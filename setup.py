@@ -12,7 +12,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 with open('README.rst') as file:
     readme = file.read()
@@ -20,7 +20,8 @@ with open('README.rst') as file:
 setup(
     name='ai_workflows',
     version='0.0.1',
-    packages=['ai_workflows'],
+    packages=find_packages(where='src'),
+    package_dir={'': 'src'},
     python_requires='>=3.10',
     install_requires=[
         'unstructured[all-docs]',
@@ -40,7 +41,6 @@ setup(
     package_data={
         'ai_workflows': ['resources/*'], # include resource files in package
     },
-    package_dir={'': 'src'},
     url='https://github.com/higherbar-ai/ai-workflows',
     project_urls={'Documentation': 'https://aiworkflows.readthedocs.io/'},
     license='Apache 2.0',
