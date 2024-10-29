@@ -1,0 +1,13 @@
+unstructured[all-docs]
+langchain<0.3,>=0.2.0
+langchain-openai==0.1.19
+langchain-community<0.3,>=0.2.0
+langsmith<0.2,>=0.1.63
+tiktoken<1.0.0,>=0.7.0
+openai==1.37.1
+tenacity
+PyMuPDF
+pymupdf4llm
+Pillow
+openpyxl
+nltk==3.9.1

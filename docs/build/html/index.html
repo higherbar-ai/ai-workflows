@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>aiworkflows Python Package Documentation &mdash; aiworkflows 0.0.1 documentation</title>
+      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+      <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js?v=5d32c60e"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js?v=bbec6902"></script>
+        <script src="_static/documentation_options.js?v=d45e8c67"></script>
+        <script src="_static/doctools.js?v=9a2dae69"></script>
+        <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="aiworkflows" href="modules.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="#" class="icon icon-home">
+            aiworkflows
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="modules.html">aiworkflows</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="#">aiworkflows</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="#" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">aiworkflows Python Package Documentation</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/index.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="aiworkflows-python-package-documentation">
+<h1>aiworkflows Python Package Documentation<a class="headerlink" href="#aiworkflows-python-package-documentation" title="Link to this heading"></a></h1>
+<p>This repository contains a toolkit for AI workflows (i.e., workflows that are pre-scripted and repeatable, but utilize
+LLMs for various tasks). It’s still in early development, but is ready to support piloting and experimentation.</p>
+<section id="installation">
+<h2>Installation<a class="headerlink" href="#installation" title="Link to this heading"></a></h2>
+<p>Install the latest version with pip:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pip</span> <span class="n">install</span> <span class="n">aiworkflows</span>
+</pre></div>
+</div>
+<p>You’ll also need to install several other dependencies, which you can do by running the <code class="docutils literal notranslate"><span class="pre">initial-setup.ipynb</span></code> Jupyter
+notebook — or by installing them manually as follows.</p>
+<p>First, download NTLK data for natural language text processing:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># download NLTK data</span>
+<span class="kn">import</span> <span class="nn">nltk</span>
+<span class="n">nltk</span><span class="o">.</span><span class="n">download</span><span class="p">(</span><span class="s1">&#39;punkt&#39;</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Then install <code class="docutils literal notranslate"><span class="pre">libreoffice</span></code> for converting Office documents to PDF.</p>
+<blockquote>
+<div><p>On Linux:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span># install LibreOffice for document processing
+!apt-get install -y libreoffice
+</pre></div>
+</div>
+<p>On MacOS:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># install LibreOffice for document processing</span>
+<span class="n">brew</span> <span class="n">install</span> <span class="n">libreoffice</span>
+</pre></div>
+</div>
+<p>On Windows:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="c1"># install LibreOffice for document processing</span>
+<span class="n">choco</span> <span class="n">install</span> <span class="o">-</span><span class="n">y</span> <span class="n">libreoffice</span>
+</pre></div>
+</div>
+</div></blockquote>
+</section>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading"></a></h2>
+<p>Here are the basics:</p>
+<ol class="arabic simple">
+<li><p>The <code class="docutils literal notranslate"><span class="pre">llm_utilities</span></code> module provides a simple interface for interacting with a large language model (LLM) via the
+<a class="reference external" href="https://python.langchain.com/docs/">LangChain API</a>. It includes the <code class="docutils literal notranslate"><span class="pre">LLMInterface</span></code> class that can be used to
+interact with OpenAI’s models in “JSON mode,” so that you get structured responses parsed to dictionaries for
+programmatic use.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">document_utilities</span></code> module provides an interface for extracting Markdown-formatted text from various file
+formats. It includes functions for reading Word, PDF, Excel, CSV, and HTML files, and then converting them into
+Markdown for use in LLM interactions. Simply create a <code class="docutils literal notranslate"><span class="pre">DocumentInterface</span></code> object and then call
+<code class="docutils literal notranslate"><span class="pre">convert_to_markdown()</span></code> to convert any file to Markdown. If you provide an <code class="docutils literal notranslate"><span class="pre">LLMInterface</span></code> object, the LLM will
+be used to help with high-quality conversion.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">example-google-colab-document-processing.ipynb</span></code> notebook provides a simple Google Colab example of how to use
+the <code class="docutils literal notranslate"><span class="pre">document_utilities</span></code> module to convert files to Markdown format.</p></li>
+<li><p>The <code class="docutils literal notranslate"><span class="pre">example-testing.ipynb</span></code> notebook provides a basic set-up for testing Markdown conversion methods (LLM-assisted
+vs. not-LLM-assisted).</p></li>
+</ol>
+<p>Typical usage:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">aiworkflows.llm_utilities</span> <span class="kn">import</span> <span class="n">LLMInterface</span>
+<span class="kn">from</span> <span class="nn">aiworkflows.document_utilities</span> <span class="kn">import</span> <span class="n">DocumentInterface</span>
+
+<span class="n">llm_interface</span> <span class="o">=</span> <span class="n">LLMInterface</span><span class="p">(</span><span class="n">openai_api_key</span><span class="o">=</span><span class="n">openai_api_key</span><span class="p">)</span>
+<span class="n">doc_interface</span> <span class="o">=</span> <span class="n">DocumentInterface</span><span class="p">(</span><span class="n">llm_interface</span><span class="o">=</span><span class="n">llm_interface</span><span class="p">)</span>
+<span class="n">markdown</span> <span class="o">=</span> <span class="n">doc_interface</span><span class="o">.</span><span class="n">convert_to_markdown</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="technical-notes">
+<h2>Technical notes<a class="headerlink" href="#technical-notes" title="Link to this heading"></a></h2>
+<section id="llminterface">
+<h3>LLMInterface<a class="headerlink" href="#llminterface" title="Link to this heading"></a></h3>
+<p>Currently, the <code class="docutils literal notranslate"><span class="pre">LLMInterface</span></code> class only works with OpenAI models, either directly from OpenAI or via Azure.</p>
+<p>Claude support (directly or via AWS Bedrock) is next up on the roadmap, followed by other models as requested.</p>
+</section>
+<section id="markdown-conversion">
+<h3>Markdown conversion<a class="headerlink" href="#markdown-conversion" title="Link to this heading"></a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">DocumentInterface.convert_to_markdown()</span></code> method uses one of several methods to convert files to Markdown:</p>
+<ol class="arabic simple">
+<li><p>If an <code class="docutils literal notranslate"><span class="pre">LLMInterface</span></code> is available, PDF files are converted to Markdown with LLM assistance: we split the PDF into
+pages (splitting double-page spreads as needed), convert each page to an image, and then convert to Markdown using
+the help of a multimodal LLM. This is the most accurate method, but it’s also the most expensive, running at about
+$0.015 per page as of October 2024. In the process, we try to keep narrative text that flows across pages together,
+drop page headers and footers, and describe images, charts, and figures as if to a blind person. We also do our best
+to convert tables to proper Markdown tables.</p></li>
+<li><p>If an <code class="docutils literal notranslate"><span class="pre">LLMInterface</span></code> is not available, we use <code class="docutils literal notranslate"><span class="pre">PyMuPDFLLM</span></code> to convert PDF files to Markdown. This method
+doesn’t handle images, charts, or figures, and it’s pretty bad at tables, but it does a good job extracting text and
+a better job adding Markdown formatting than most other libraries. (<code class="docutils literal notranslate"><span class="pre">PyMuPDFLLM</span></code> also supports a range of other
+file formats, and we also use it to convert them to Markdown. That includes <code class="docutils literal notranslate"><span class="pre">.xps</span></code>, <code class="docutils literal notranslate"><span class="pre">.epub</span></code>, <code class="docutils literal notranslate"><span class="pre">.mobi</span></code>,
+<code class="docutils literal notranslate"><span class="pre">.fb2</span></code>, <code class="docutils literal notranslate"><span class="pre">.cbz</span></code>, <code class="docutils literal notranslate"><span class="pre">.svg</span></code>, and <code class="docutils literal notranslate"><span class="pre">.txt</span></code> formats.)</p></li>
+<li><p>For <code class="docutils literal notranslate"><span class="pre">.xlsx</span></code> files without charts or images, we use a custom parser to convert worksheets and table ranges to proper
+Markdown tables. If there are charts or images and we have an <code class="docutils literal notranslate"><span class="pre">LLMInterface</span></code> available, we use LibreOffice to
+convert to PDF and, if it’s 10 pages or fewer, we convert from the PDF to Markdown using the LLM assistance method
+described above. If it’s more than 10 pages, we fall back to the <code class="docutils literal notranslate"><span class="pre">Unstructured</span></code> method described below.</p></li>
+<li><p>If we have an <code class="docutils literal notranslate"><span class="pre">LLMInterface</span></code> available, we use LibreOffice to convert <code class="docutils literal notranslate"><span class="pre">.docx</span></code>, <code class="docutils literal notranslate"><span class="pre">.doc</span></code>, and <code class="docutils literal notranslate"><span class="pre">.pptx</span></code> files to
+PDF and then convert the PDF to Markdown using the LLM assistance method described above. Otherwise, we fall back to
+the <code class="docutils literal notranslate"><span class="pre">Unstructured</span></code> method described below.</p></li>
+<li><p>Finally, if we haven’t managed to convert the file using one of the higher-quality methods described above, we use
+the <code class="docutils literal notranslate"><span class="pre">Unstructured</span></code> library to parse the file into elements and then add basic Markdown formatting. This method is
+fast and cheap, but it’s also the least accurate.</p></li>
+</ol>
+</section>
+</section>
+<section id="roadmap">
+<h2>Roadmap<a class="headerlink" href="#roadmap" title="Link to this heading"></a></h2>
+<p>There’s much that can be improved here. For example:</p>
+<ul class="simple">
+<li><p>Tracking and reporting LLM costs</p></li>
+<li><p>Improving evaluation and comparison methods</p></li>
+<li><p>Adding Claude and AWS Bedrock support</p></li>
+<li><p>Adding OCR support for PDF files when an LLM isn’t available</p></li>
+</ul>
+</section>
+<section id="credits">
+<h2>Credits<a class="headerlink" href="#credits" title="Link to this heading"></a></h2>
+<p>This toolkit was originally developed by <a class="reference external" href="https://higherbar.ai">Higher Bar AI, PBC</a>, a public benefit corporation. To
+contact us, email us at <code class="docutils literal notranslate"><span class="pre">info&#64;higherbar.ai</span></code></p>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="modules.html">aiworkflows</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="document_utilities.html">document_utilities module</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="document_utilities.html#document_utilities.DocumentInterface"><code class="docutils literal notranslate"><span class="pre">DocumentInterface</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.DocumentInterface.__init__"><code class="docutils literal notranslate"><span class="pre">DocumentInterface.__init__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.DocumentInterface.convert_to_markdown"><code class="docutils literal notranslate"><span class="pre">DocumentInterface.convert_to_markdown()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.DocumentInterface.convert_to_pdf"><code class="docutils literal notranslate"><span class="pre">DocumentInterface.convert_to_pdf()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter.ExcelContent"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter.ExcelContent</span></code></a><ul>
+<li class="toctree-l5"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter.ExcelContent.TableRange"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter.ExcelContent.TableRange</span></code></a></li>
+<li class="toctree-l5"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter.ExcelContent.__init__"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter.ExcelContent.__init__()</span></code></a></li>
+<li class="toctree-l5"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter.ExcelContent.find_tables"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter.ExcelContent.find_tables()</span></code></a></li>
+<li class="toctree-l5"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter.ExcelContent.has_unsupported_content"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter.ExcelContent.has_unsupported_content()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter.convert_excel_to_markdown"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter.convert_excel_to_markdown()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter.create_markdown_table"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter.create_markdown_table()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.ExcelDocumentConverter.excel_to_strftime_format"><code class="docutils literal notranslate"><span class="pre">ExcelDocumentConverter.excel_to_strftime_format()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="document_utilities.html#document_utilities.PDFDocumentConverter"><code class="docutils literal notranslate"><span class="pre">PDFDocumentConverter</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.PDFDocumentConverter.__init__"><code class="docutils literal notranslate"><span class="pre">PDFDocumentConverter.__init__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.PDFDocumentConverter.assemble_markdown"><code class="docutils literal notranslate"><span class="pre">PDFDocumentConverter.assemble_markdown()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.PDFDocumentConverter.clean_and_reorder_elements"><code class="docutils literal notranslate"><span class="pre">PDFDocumentConverter.clean_and_reorder_elements()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.PDFDocumentConverter.get_image_bytes"><code class="docutils literal notranslate"><span class="pre">PDFDocumentConverter.get_image_bytes()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.PDFDocumentConverter.pdf_to_images"><code class="docutils literal notranslate"><span class="pre">PDFDocumentConverter.pdf_to_images()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.PDFDocumentConverter.pdf_to_markdown"><code class="docutils literal notranslate"><span class="pre">PDFDocumentConverter.pdf_to_markdown()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.PDFDocumentConverter.starts_with_heading"><code class="docutils literal notranslate"><span class="pre">PDFDocumentConverter.starts_with_heading()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="document_utilities.html#document_utilities.UnstructuredDocumentConverter"><code class="docutils literal notranslate"><span class="pre">UnstructuredDocumentConverter</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.UnstructuredDocumentConverter.DocumentElement"><code class="docutils literal notranslate"><span class="pre">UnstructuredDocumentConverter.DocumentElement</span></code></a><ul>
+<li class="toctree-l5"><a class="reference internal" href="document_utilities.html#document_utilities.UnstructuredDocumentConverter.DocumentElement.__init__"><code class="docutils literal notranslate"><span class="pre">UnstructuredDocumentConverter.DocumentElement.__init__()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.UnstructuredDocumentConverter.__init__"><code class="docutils literal notranslate"><span class="pre">UnstructuredDocumentConverter.__init__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="document_utilities.html#document_utilities.UnstructuredDocumentConverter.convert_to_markdown"><code class="docutils literal notranslate"><span class="pre">UnstructuredDocumentConverter.convert_to_markdown()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="llm_utilities.html">llm_utilities module</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="llm_utilities.html#llm_utilities.LLMInterface"><code class="docutils literal notranslate"><span class="pre">LLMInterface</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="llm_utilities.html#llm_utilities.LLMInterface.__init__"><code class="docutils literal notranslate"><span class="pre">LLMInterface.__init__()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="llm_utilities.html#llm_utilities.LLMInterface.llm_json_response"><code class="docutils literal notranslate"><span class="pre">LLMInterface.llm_json_response()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="llm_utilities.html#llm_utilities.LLMInterface.llm_json_response_with_timeout"><code class="docutils literal notranslate"><span class="pre">LLMInterface.llm_json_response_with_timeout()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="llm_utilities.html#llm_utilities.LLMInterface.process_json_response"><code class="docutils literal notranslate"><span class="pre">LLMInterface.process_json_response()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+</section>
+</section>
+<section id="indices-and-tables">
+<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Link to this heading"></a></h1>
+<ul class="simple">
+<li><p><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></p></li>
+<li><p><a class="reference internal" href="py-modindex.html"><span class="std std-ref">Module Index</span></a></p></li>
+<li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
+</ul>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modules.html" class="btn btn-neutral float-right" title="aiworkflows" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Higher Bar AI, PBC.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
