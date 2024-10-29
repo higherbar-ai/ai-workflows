@@ -114,7 +114,7 @@ Temporary Items
 .apdisk
 
 # Directories created by setuptools, during Python packaging
-/src/ai_workflows.egg-info/
+/src/py_ai_workflows.egg-info/
 /dist/
 /build/
 /src/.scrapy/
