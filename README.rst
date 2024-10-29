@@ -1,6 +1,6 @@
-===========
-aiworkflows
-===========
+============
+ai_workflows
+============
 
 This repository contains a toolkit for AI workflows (i.e., workflows that are pre-scripted and repeatable, but utilize
 LLMs for various tasks). It's still in early development, but is ready to support piloting and experimentation.
@@ -10,7 +10,7 @@ Installation
 
 Install the latest version with pip::
 
-    pip install aiworkflows
+    pip install ai_workflows
 
 You'll also need to install several other dependencies, which you can do by running the ``initial-setup.ipynb`` Jupyter
 notebook — or by installing them manually as follows.
@@ -61,8 +61,8 @@ Here are the basics:
 
 Typical usage::
 
-    from aiworkflows.llm_utilities import LLMInterface
-    from aiworkflows.document_utilities import DocumentInterface
+    from ai_workflows.llm_utilities import LLMInterface
+    from ai_workflows.document_utilities import DocumentInterface
 
     llm_interface = LLMInterface(openai_api_key=openai_api_key)
     doc_interface = DocumentInterface(llm_interface=llm_interface)
@@ -126,7 +126,7 @@ Full documentation
 
 See the full reference documentation here:
 
-    https://aiworkflows.readthedocs.io/
+    https://ai-workflows.readthedocs.io/
 
 Local development
 -----------------
@@ -137,6 +137,7 @@ To develop locally:
 #. ``cd ai-workflows``
 #. ``python -m venv venv``
 #. ``source venv/bin/activate``
+#. ``pip install -e .``
 #. Execute the ``initial-setup.ipynb`` Jupyter notebook to install system dependencies.
 
 For convenience, the repo includes ``.idea`` project files for PyCharm.
@@ -147,7 +148,7 @@ To rebuild the documentation:
 #. Update layout or options as needed in ``/docs/source/index.rst``
 #. In a terminal window, from the project directory:
     a. ``cd docs``
-    b. ``SPHINX_APIDOC_OPTIONS=members,show-inheritance sphinx-apidoc -o source ../src/aiworkflows --separate --force``
+    b. ``SPHINX_APIDOC_OPTIONS=members,show-inheritance sphinx-apidoc -o source ../src/ai_workflows --separate --force``
     c. ``make clean html``
 
 To rebuild the distribution packages:
@@ -163,5 +164,5 @@ To rebuild the distribution packages:
     a. Commit everything to GitHub and merge to ``main`` branch
     b. Add new release, linking to new tag like ``v#.#.#`` in main branch
 #. For readthedocs.io:
-    a. Go to https://readthedocs.org/projects/aiworkflows/, log in, and click to rebuild from GitHub (only if it
+    a. Go to https://readthedocs.org/projects/ai-workflows/, log in, and click to rebuild from GitHub (only if it
        doesn't automatically trigger)

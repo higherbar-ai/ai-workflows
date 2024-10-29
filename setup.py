@@ -18,9 +18,9 @@ with open('README.rst') as file:
     readme = file.read()
 
 setup(
-    name='aiworkflows',
+    name='ai_workflows',
     version='0.0.1',
-    packages=['aiworkflows'],
+    packages=['ai_workflows'],
     python_requires='>=3.10',
     install_requires=[
         'unstructured[all-docs]',
@@ -38,7 +38,7 @@ setup(
         'nltk==3.9.1',
     ],
     package_data={
-        'aiworkflows': ['resources/*'], # include resource files in package
+        'ai_workflows': ['resources/*'], # include resource files in package
     },
     package_dir={'': 'src'},
     url='https://github.com/higherbar-ai/ai-workflows',

@@ -1,10 +1,10 @@
-aiworkflows Python Package Documentation
-========================================
+ai_workflows Python Package Documentation
+=========================================
 
 .. include:: ../../README.rst
     :start-after: ===========
-     aiworkflows
-     ===========
+     ai_workflows
+     ============
     :end-before: Full documentation
 
 .. toctree::
