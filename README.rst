@@ -113,6 +113,7 @@ There's much that can be improved here. For example:
 * Unit testing
 * Tracking and reporting LLM costs
 * Improving evaluation and comparison methods
+* Parallelizing LLM calls for faster processing
 * Adding support for reading documents as JSON rather than Markdown (using an LLM parsing layer)
 * Adding Claude and AWS Bedrock support
 * Adding OCR support for PDF files when an LLM isn't available
