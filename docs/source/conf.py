@@ -8,12 +8,12 @@
 import sphinx_rtd_theme
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../../src/aiworkflows'))
+sys.path.insert(0, os.path.abspath('../../src/ai_workflows'))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'aiworkflows'
+project = 'ai-workflows'
 copyright = '2024, Higher Bar AI, PBC'
 author = 'Higher Bar AI, PBC'
 release = '0.0.1'
