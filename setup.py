@@ -18,7 +18,7 @@ with open('README.rst') as file:
     readme = file.read()
 
 setup(
-    name='ai_workflows',
+    name='py-ai-workflows',
     version='0.0.1',
     packages=find_packages(where='src'),
     package_dir={'': 'src'},

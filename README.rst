@@ -10,7 +10,7 @@ Installation
 
 Install the latest version with pip::
 
-    pip install ai_workflows
+    pip install py-ai-workflows
 
 You'll also need to install several other dependencies, which you can do by running the ``initial-setup.ipynb`` Jupyter
 notebook — or by installing them manually as follows.
