@@ -264,7 +264,7 @@ class PDFDocumentConverter:
         return images
 
     @staticmethod
-    def get_image_bytes(image: Image.Image, output_format: str = 'PNG') -> bytes:
+    def _get_image_bytes(image: Image.Image, output_format: str = 'PNG') -> bytes:
         """
         Convert a PIL Image to bytes in the specified format.
 
@@ -283,7 +283,7 @@ class PDFDocumentConverter:
         return img_byte_arr.getvalue()
 
     @staticmethod
-    def starts_with_heading(content: str) -> bool:
+    def _starts_with_heading(content: str) -> bool:
         """
         Check if the content appears to start with a heading.
 
@@ -321,7 +321,7 @@ class PDFDocumentConverter:
         return False
 
     @staticmethod
-    def clean_and_reorder_elements(elements: list[dict]) -> list[dict]:
+    def _clean_and_reorder_elements(elements: list[dict]) -> list[dict]:
         """
         Clean and reorder elements, dropping page headers and footers and reordering body text sections as needed to
         ensure uninterrupted cross-page flow within sections.
@@ -341,7 +341,7 @@ class PDFDocumentConverter:
                 continue
             elif element_type == 'body_text_section':
                 content = element.get('content', '')
-                if PDFDocumentConverter.starts_with_heading(content):
+                if PDFDocumentConverter._starts_with_heading(content):
                     # sections with headings can appear in their existing order
                     output_elements.append(element)
                     last_body_text_idx = len(output_elements) - 1
@@ -362,7 +362,7 @@ class PDFDocumentConverter:
         return output_elements
 
     @staticmethod
-    def assemble_markdown(elements: list[dict]) -> str:
+    def _assemble_markdown(elements: list[dict]) -> str:
         """
         Assemble a list of elements into a single markdown output.
 
@@ -393,7 +393,8 @@ class PDFDocumentConverter:
         Process a PDF file to extract elements and output Markdown text.
 
         This function reads a PDF file, converts it to images, processes each image with an LLM, and assembles the
-        returned elements into a single markdown output.
+        returned elements into a single markdown output. If no LLM is available, the function falls back to PyMuPDFLLM
+        for Markdown conversion.
 
         :param pdf_path: Path to the PDF file.
         :type pdf_path: str
@@ -403,9 +404,8 @@ class PDFDocumentConverter:
 
         # check for LLM interface
         if self.llm_interface is None:
-            # since no LLM interface, use Unstructured
-            doc_converter = UnstructuredDocumentConverter()
-            return doc_converter.convert_to_markdown(pdf_path)
+            # since no LLM interface, use PyMuPDFLLM to convert PDF to Markdown
+            return pymupdf4llm.to_markdown(pdf_path)
 
         # otherwise, convert PDF to images
         images = PDFDocumentConverter.pdf_to_images(pdf_path)
@@ -469,7 +469,7 @@ Your JSON response with the `elements` object list (each with `type` and `conten
             logging.log(logging.INFO, f"Processing page {i + 1}: Size={img.size}, Mode={img.mode}")
 
             # encode image contents for OpenAI
-            encoded_image = base64.b64encode(PDFDocumentConverter.get_image_bytes(img)).decode('utf-8')
+            encoded_image = base64.b64encode(PDFDocumentConverter._get_image_bytes(img)).decode('utf-8')
             # call out to the LLM and process the returned JSON
             response_text, response_dict = self.llm_interface.process_json_response(
                 self.llm_interface.llm_json_response_with_timeout([
@@ -492,10 +492,10 @@ Your JSON response with the `elements` object list (each with `type` and `conten
                 logging.error(f"ERROR: No response from LLM")
 
         # drop all headers and footers, re-order body text to flow continuously within sections
-        all_elements = self.clean_and_reorder_elements(all_elements)
+        all_elements = self._clean_and_reorder_elements(all_elements)
 
         # assemble and return markdown output
-        all_markdown = self.assemble_markdown(all_elements)
+        all_markdown = self._assemble_markdown(all_elements)
         return all_markdown
 
 
@@ -759,7 +759,7 @@ class ExcelDocumentConverter:
             return header_indicators >= 2
 
     @staticmethod
-    def excel_to_strftime_format(excel_format: str) -> str:
+    def _excel_to_strftime_format(excel_format: str) -> str:
         """
         Convert an Excel date format to a strftime format.
 
@@ -821,8 +821,8 @@ class ExcelDocumentConverter:
                 from datetime import datetime
                 if isinstance(value, datetime):
                     # do our best to format dates and times as specified in the document, otherwise use a default format
-                    strftime_format = ExcelDocumentConverter.excel_to_strftime_format(cell.number_format
-                                                                                      or '%Y-%m-%d %H:%M:%S')
+                    strftime_format = ExcelDocumentConverter._excel_to_strftime_format(cell.number_format
+                                                                                       or '%Y-%m-%d %H:%M:%S')
                     return value.strftime(strftime_format)
                 return str(value)
             except:
@@ -921,7 +921,7 @@ class ExcelDocumentConverter:
         return cell.row == merge_range.min_row and cell.column == merge_range.min_col
 
     @staticmethod
-    def create_markdown_table(sheet: Worksheet, table_range: ExcelContent.TableRange) -> str:
+    def _create_markdown_table(sheet: Worksheet, table_range: ExcelContent.TableRange) -> str:
         """
         Convert a table range to Markdown format.
 
@@ -1137,7 +1137,7 @@ class ExcelDocumentConverter:
                                 markdown_content.append(f'### {title}\n')
 
                         # convert table to markdown
-                        markdown_table = ExcelDocumentConverter.create_markdown_table(sheet, table)
+                        markdown_table = ExcelDocumentConverter._create_markdown_table(sheet, table)
                         if markdown_table:
                             markdown_content.append(markdown_table + '\n')
 
