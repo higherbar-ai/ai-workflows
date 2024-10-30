@@ -81,6 +81,75 @@ class DocumentInterface:
         :rtype: str
         """
 
+        # use internal conversion function
+        return self._convert(filepath, to_format="md")
+
+    def convert_to_json(self, filepath: str, json_context: str, json_job: str, json_output_spec: str,
+                        markdown_first: bool = False) -> list[dict]:
+        """
+        Convert a document to JSON.
+
+        :param filepath: Path to the file.
+        :type filepath: str
+        :param json_context: Context for the LLM prompt used in JSON conversion (e.g., "The file contains a survey
+          instrument administered by trained enumerators to households in Zimbabwe."). (Required for JSON output.)
+        :type json_context: str
+        :param json_job: Description of the job to do for the LLM prompt used in JSON conversion (e.g., "Your job is to
+          extract each question or form field included in the text or page given."). (Required for JSON output.)
+        :type json_job: str
+        :param json_output_spec: JSON output specification for the LLM prompt (e.g., "Respond in correctly-formatted
+          JSON with a single key named `questions` that is a list of dicts, one for each question or form field, each
+          with the keys listed below..."). (Required for JSON output.)
+        :type json_output_spec: str
+        :param markdown_first: Whether to convert to Markdown first and then to JSON using an LLM. Default is False.
+          Set this to true if page-by-page conversion is not working well for elements that span pages; the
+          Markdown-first approach will convert page-by-page to Markdown and then convert to JSON as the next step.
+        :type markdown_first: bool
+        :return: List of dicts from page-level JSON results.
+        :rtype: list[dict]
+        """
+
+        # use internal conversion function
+        return self._convert(filepath, to_format="json" if not markdown_first else "mdjson",
+                             json_context=json_context, json_job=json_job, json_output_spec=json_output_spec)
+
+    def _convert(self, filepath: str, to_format: str = "md", json_context: str = "", json_job: str = "",
+                 json_output_spec: str = "") -> str | list[dict]:
+        """
+        Convert a document to Markdown or JSON.
+
+        :param filepath: Path to the file.
+        :type filepath: str
+        :param to_format: Format to convert to ("md" for Markdown, "json" for JSON, or "mdjson" for JSON from Markdown).
+          Default is "md" for Markdown. The "mdjson" option is a special case that converts to Markdown first and then
+          to JSON using an LLM. In contrast, the "json" option converts directly to JSON using an LLM when it can,
+          bypassing the Markdown step (but when it does, it processes the document page-by-page, which can lead to
+          worse results if elements span pages). Note that all JSON conversion requires an LLM interface be passed to
+          the DocumentInterface constructor.
+        :type to_format: str
+        :param json_context: Context for the LLM prompt used in JSON conversion (e.g., "The file contains a survey
+          instrument administered by trained enumerators to households in Zimbabwe."). (Required for JSON output.)
+        :type json_context: str
+        :param json_job: Description of the job to do for the LLM prompt used in JSON conversion (e.g., "Your job is to
+          extract each question or form field included in the text or page given."). (Required for JSON output.)
+        :type json_job: str
+        :param json_output_spec: JSON output specification for the LLM prompt (e.g., "Respond in correctly-formatted
+          JSON with a single key named `questions` that is a list of dicts, one for each question or form field, each
+          with the keys listed below..."). (Required for JSON output.)
+        :type json_output_spec: str
+        :return: Markdown output or list of dicts containing JSON results.
+        :rtype: str | list[dict]
+        """
+
+        # validate parameters
+        if to_format not in ["md", "json", "mdjson"]:
+            raise ValueError("Invalid 'to_format' parameter; must be 'md' for Markdown, 'json' for JSON, or 'mdjson' "
+                             "for JSON via Markdown.")
+        if to_format in ["json", "mdjson"] and (not json_context or not json_job or not json_output_spec):
+            raise ValueError("For JSON output, 'context', 'job_to_do', and 'output_format' parameters are required.")
+        if to_format in ["json", "mdjson"] and self.llm_interface is None:
+            raise ValueError("LLM interface required for JSON output.")
+
         # extract file extension
         ext = os.path.splitext(filepath)[1].lower()
 
@@ -88,34 +157,57 @@ class DocumentInterface:
         if self.llm_interface is not None:
             # always convert PDFs with the LLM
             if ext == '.pdf':
-                # convert PDF to markdown using LLM
+                # convert PDF using LLM
                 pdf_converter = PDFDocumentConverter(self.llm_interface)
-                return pdf_converter.pdf_to_markdown(filepath)
+                if to_format == "md":
+                    # convert to Markdown
+                    return pdf_converter.pdf_to_markdown(filepath)
+                elif to_format == "json":
+                    # convert directly to JSON
+                    return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec)
+                else:
+                    # convert to Markdown and then to JSON
+                    markdown = pdf_converter.pdf_to_markdown(filepath)
+                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
 
             # convert certain other file types to PDF to then convert with the LLM
             if ext in DocumentInterface.via_pdf_file_extensions:
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # convert to PDF in temporary directory
                     pdf_path = self.convert_to_pdf(filepath, temp_dir)
-                    # convert PDF to markdown using LLM
+                    # convert PDF using LLM
                     pdf_converter = PDFDocumentConverter(self.llm_interface)
-                    return pdf_converter.pdf_to_markdown(pdf_path)
+                    if to_format == "md":
+                        # convert to Markdown
+                        return pdf_converter.pdf_to_markdown(pdf_path)
+                    elif to_format == "json":
+                        # convert directly to JSON
+                        return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec)
+                    else:
+                        # convert to Markdown and then to JSON
+                        markdown = pdf_converter.pdf_to_markdown(pdf_path)
+                        return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
 
         # if Excel, see if we can convert to Markdown using our custom converter
         if ext == '.xlsx':
-            # convert Excel to Markdown using custom converter, trying at first to keep images and charts if we have
-            # an LLM available
-            result, markdown = ExcelDocumentConverter.convert_excel_to_markdown(filepath,
-                                                                                lose_unsupported_content
-                                                                                =not self.llm_interface)
+            # convert Excel to Markdown using custom converter
+            # (try to keep images and charts if we have an LLM available and we're after Markdown output)
+            result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
+                                (filepath, lose_unsupported_content=(not (self.llm_interface and to_format == "md"))))
             if result:
-                return markdown
+                if to_format == "json":
+                    # if we're after JSON, convert the Markdown to JSON using the LLM
+                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
+                else:
+                    # otherwise, just return the Markdown
+                    return markdown
             else:
                 # log reason from returned Markdown
                 logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
 
-                # if we have an LLM, PDF it and then convert with LLM (otherwise we'll fall through to Unstructured)
-                if self.llm_interface is not None:
+                # if we have an LLM and we're after Markdown, PDF it and then convert with LLM if we can
+                # (we don't want to use an LLM on Excel files headed for JSON)
+                if self.llm_interface is not None and to_format == "md":
                     with (tempfile.TemporaryDirectory() as temp_dir):
                         # convert to PDF in temporary directory
                         pdf_path = self.convert_to_pdf(filepath, temp_dir)
@@ -130,9 +222,8 @@ class DocumentInterface:
                             logging.info(f"{filepath} converted to {len(doc)} pages, which is over the limit "
                                          f"({DocumentInterface.max_xlsx_via_pdf_pages}); converting without images or "
                                          f"charts...")
-                            result, markdown = ExcelDocumentConverter.convert_excel_to_markdown(filepath,
-                                                                                                lose_unsupported_content
-                                                                                                =True)
+                            result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
+                                                (filepath, lose_unsupported_content=True))
                             if result:
                                 return markdown
                             else:
@@ -142,11 +233,18 @@ class DocumentInterface:
 
         # otherwise, see if we can use PyMuPDFLLM to convert (includes .pdf, .txt, .svg, .cbz, .epub, .mobi, .xps)
         if ext in DocumentInterface.pymupdf_file_extensions:
-            return pymupdf4llm.to_markdown(filepath)
+            markdown = pymupdf4llm.to_markdown(filepath)
+        else:
+            # otherwise, use Unstructured to convert
+            doc_converter = UnstructuredDocumentConverter()
+            markdown = doc_converter.convert_to_markdown(filepath)
 
-        # otherwise, use Unstructured to convert
-        doc_converter = UnstructuredDocumentConverter()
-        return doc_converter.convert_to_markdown(filepath)
+        if to_format == "json":
+            # if we're after JSON, convert the Markdown to JSON using the LLM
+            return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
+        else:
+            # otherwise, just return the Markdown
+            return markdown
 
     @staticmethod
     def convert_to_pdf(filepath: str, output_dir: str) -> str:
@@ -175,6 +273,60 @@ class DocumentInterface:
 
         # return path to the converted PDF file
         return os.path.join(output_dir, os.path.splitext(os.path.basename(filepath))[0] + '.pdf')
+
+    def markdown_to_json(self, markdown: str, json_context: str, json_job: str, json_output_spec: str) -> list[dict]:
+        """
+        Convert Markdown text to JSON using an LLM.
+
+        :param json_context: Context for the LLM prompt (e.g., "The file contains a survey instrument administered by
+          trained enumerators to households in Zimbabwe.").
+        :type json_context: str
+        :param json_job: Job to do for the LLM prompt (e.g., "Your job is to extract each question or form field
+          included in the text.").
+        :type json_job: str
+        :param json_output_spec: Output format for the LLM prompt (e.g., "Respond in correctly-formatted JSON with a
+          single key named `questions` that is a list of dicts, one for each question or form field, each with the keys
+          listed below...").
+        :type json_output_spec: str
+        :return: List of dicts with JSON results (could be all results in one dict, could be split into multiple because
+          of page-by-page or other batched processing).
+        :rtype: list[dict]
+        """
+
+        # require LLM interface to continue
+        if self.llm_interface is None:
+            raise ValueError("LLM interface required for JSON conversion")
+
+        # set up for JSON processing
+        json_prompt = f"""Consider the Markdown text below, which has been extracted from a file.
+
+{json_context}
+
+{json_job}
+
+{json_output_spec}
+
+Markdown text enclosed by |@| delimiters:
+
+|@|{markdown}|@|
+
+Your JSON response precisely following the instructions given above the Markdown text:"""
+
+        # for now, process all in one go (assumes it all fits in the LLM context window)
+        response_text, response_dict = self.llm_interface.process_json_response(
+            self.llm_interface.llm_json_response_with_timeout(
+                [HumanMessage(content=[{"type": "text", "text": json_prompt}])]))
+
+        # raise exception if we didn't get a response
+        if response_dict is None:
+            logging.error(f"ERROR: Error extracting JSON from Markdown: {response_text}")
+            raise ValueError(f"Error extracting JSON from Markdown: {response_text}")
+
+        # log all returned elements
+        logging.info(f"Extracted JSON from Markdown: {json.dumps(response_dict, indent=2)}")
+
+        # return results
+        return [response_dict]
 
 
 class PDFDocumentConverter:
@@ -264,7 +416,7 @@ class PDFDocumentConverter:
         return images
 
     @staticmethod
-    def get_image_bytes(image: Image.Image, output_format: str = 'PNG') -> bytes:
+    def _get_image_bytes(image: Image.Image, output_format: str = 'PNG') -> bytes:
         """
         Convert a PIL Image to bytes in the specified format.
 
@@ -283,7 +435,7 @@ class PDFDocumentConverter:
         return img_byte_arr.getvalue()
 
     @staticmethod
-    def starts_with_heading(content: str) -> bool:
+    def _starts_with_heading(content: str) -> bool:
         """
         Check if the content appears to start with a heading.
 
@@ -321,7 +473,7 @@ class PDFDocumentConverter:
         return False
 
     @staticmethod
-    def clean_and_reorder_elements(elements: list[dict]) -> list[dict]:
+    def _clean_and_reorder_elements(elements: list[dict]) -> list[dict]:
         """
         Clean and reorder elements, dropping page headers and footers and reordering body text sections as needed to
         ensure uninterrupted cross-page flow within sections.
@@ -341,7 +493,7 @@ class PDFDocumentConverter:
                 continue
             elif element_type == 'body_text_section':
                 content = element.get('content', '')
-                if PDFDocumentConverter.starts_with_heading(content):
+                if PDFDocumentConverter._starts_with_heading(content):
                     # sections with headings can appear in their existing order
                     output_elements.append(element)
                     last_body_text_idx = len(output_elements) - 1
@@ -362,7 +514,7 @@ class PDFDocumentConverter:
         return output_elements
 
     @staticmethod
-    def assemble_markdown(elements: list[dict]) -> str:
+    def _assemble_markdown(elements: list[dict]) -> str:
         """
         Assemble a list of elements into a single markdown output.
 
@@ -388,12 +540,83 @@ class PDFDocumentConverter:
         # return assembled markdown output with extra newlines at the end stripped out
         return markdown_output.strip()
 
+    def pdf_to_json(self, pdf_path: str, json_context: str, json_job: str, json_output_spec: str) -> list[dict]:
+        """
+        Process a PDF file page-by-page to extract elements and output JSON text.
+
+        This function reads a PDF file, converts pages to images, processes each image with an LLM, and assembles the
+        returned elements into a single JSON output.
+
+        :param pdf_path: Path to the PDF file.
+        :type pdf_path: str
+        :param json_context: Context for the LLM prompt (e.g., "The file contains a survey instrument.").
+        :type json_context: str
+        :param json_job: Job to do for the LLM prompt (e.g., "Your job is to extract each question or form field
+          included on the page."). In this case, the job will be to process each page, one at a time.
+        :type json_job: str
+        :param json_output_spec: Output format for the LLM prompt (e.g., "Respond in correctly-formatted JSON with a
+          single key named `questions` that is a list of dicts, one for each question or form field, each with the keys
+          listed below...").
+        :type json_output_spec: str
+        :return: List of parsed results from all pages, one per page, in order.
+        :rtype: list[dict]
+        """
+
+        # require LLM interface to continue
+        if self.llm_interface is None:
+            raise ValueError("LLM interface required for PDF to JSON conversion")
+
+        # convert PDF to images
+        images = PDFDocumentConverter.pdf_to_images(pdf_path)
+
+        # set up for image processing
+        image_prompt = f"""Consider the attached image, which shows a single page (or, sometimes, two facing pages) from a PDF file.
+
+{json_context}
+
+{json_job}
+
+{json_output_spec}
+
+Your JSON response precisely following the instructions above:"""
+
+        # process each page
+        all_dicts = []
+        logging.log(logging.INFO, f"Processing PDF {pdf_path} from {len(images)} images")
+        for i, img in enumerate(images):
+            logging.log(logging.INFO, f"Processing PDF page {i + 1}: Size={img.size}, Mode={img.mode}")
+
+            # encode image contents for OpenAI
+            encoded_image = base64.b64encode(PDFDocumentConverter._get_image_bytes(img)).decode('utf-8')
+            # call out to the LLM and process the returned JSON
+            response_text, response_dict = self.llm_interface.process_json_response(
+                self.llm_interface.llm_json_response_with_timeout([
+                    HumanMessage(content=[
+                        {"type": "text", "text": image_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
+                    ])]))
+
+            # assemble results
+            if response_dict is not None:
+                # add response to running list of parsed results
+                all_dicts.append(response_dict)
+
+                # log all returned elements
+                logging.info(f"Extracted JSON for page {i + 1}: {json.dumps(response_dict, indent=2)}")
+            else:
+                logging.error(f"ERROR: Error extracting JSON from page {i+1}: {response_text}")
+                raise ValueError(f"Error extracting JSON from page {i+1} of {pdf_path}: {response_text}")
+
+        # return all results
+        return all_dicts
+
     def pdf_to_markdown(self, pdf_path: str) -> str:
         """
         Process a PDF file to extract elements and output Markdown text.
 
         This function reads a PDF file, converts it to images, processes each image with an LLM, and assembles the
-        returned elements into a single markdown output.
+        returned elements into a single markdown output. If no LLM is available, the function falls back to PyMuPDFLLM
+        for Markdown conversion.
 
         :param pdf_path: Path to the PDF file.
         :type pdf_path: str
@@ -403,99 +626,77 @@ class PDFDocumentConverter:
 
         # check for LLM interface
         if self.llm_interface is None:
-            # since no LLM interface, use Unstructured
-            doc_converter = UnstructuredDocumentConverter()
-            return doc_converter.convert_to_markdown(pdf_path)
+            # since no LLM interface, use PyMuPDFLLM to convert PDF to Markdown
+            return pymupdf4llm.to_markdown(pdf_path)
 
-        # otherwise, convert PDF to images
-        images = PDFDocumentConverter.pdf_to_images(pdf_path)
+        # otherwise, we'll use the LLM to process the PDF
+        json_context = "The page might include a mix of text, tables, figures, charts, images, or other elements."
 
-        # set up for image processing
-        image_prompt = f"""Consider the attached image. It represents a single page from a PDF file (or, sometimes, two facing pages). 
+        json_job = f"""Your job is to:
 
-Your job is to:
+First, scan the image to identify each distinct element in the image, where each element is a part of the page that can be handled separately from the other parts of the page. Elements include, for example:
 
-1. Recognize each distinct element in the image, where each element is a part of the page that can be handled separately from the other parts of the page. Elements include, for example:
+   1. The main body text (if any), possibly separated into sections. This is the primary text of the page, which can begin on prior pages and/or continue on to future pages.
 
-   a. The main body text (if any), possibly separated into sections. This is the primary text of the page, which can begin on prior pages and/or continue on to future pages.
+   2. Boxout text (if any). These might be sidebars, callout boxes, or other separated sub-sections that are self-contained within the page.
 
-   b. Boxout text (if any). These might be sidebars, callout boxes, or other separated sub-sections that are self-contained within the page.
+   3. Tables (if any). These might include a title, the table itself, and, possibly, end notes or captions.
 
-   c. Tables (if any). These might include a title, the table itself, and, possibly, end notes or captions.
+   4. Charts or graphs (if any). These might include a title, the chart or graph itself, and, possibly, notes or captions just beneath the chart or graph.
 
-   d. Charts or graphs (if any). These might include a title, the chart or graph itself, and, possibly, notes or captions just beneath the chart or graph.
+   5. Image or figure (if any). These might include a title, the image or figure itself, and, possibly, notes or captions just beneath the image or figure.
 
-   e. Image or figure (if any). These might include a title, the image or figure itself, and, possibly, notes or captions just beneath the image or figure.
+   6. Footnotes (if any). These should include a note number or letter as well as text.
 
-   f. Footnotes (if any). These should include a note number or letter as well as text.
+   7. Page headers and footers (if any). These are the thin, one-or-two-line headers or footers that tend to appear at the top or bottom of pages, often with a title and page number. (Do not consider larger, more-substantive headers or footers with real page content to be headers and footers, but rather part of the main body text.)
 
-   g. Page headers and footers (if any). These are the thin, one-or-two-line headers or footers that tend to appear at the top or bottom of pages, often with a title and page number. (Do not consider larger, more-substantive headers or footers with real page content to be headers and footers, but rather part of the main body text.)
+   8. Watermarks or other background images or design elements that are purely decorative and are not needed to understand the meaning of the page content (if any). These you want to ignore completely.
 
-   h. Watermarks or other background images or design elements that are purely decorative and are not needed to understand the meaning of the page content (if any). These you want to ignore completely.
+   9. Other (if any). Any other content that doesn't fit into one of the categories above.
 
-   i. Other (if any). Any other content that doesn't fit into one of the categories above.
+Then, respond in correctly-formatted JSON according to the format described below."""
 
-2. Respond in correctly-formatted JSON with a single key named `elements` that is a list of dicts, one for each element, each with the keys listed below. These elements should be ordered as a human reader is meant to read them (generally from left to right and top to bottom, but might vary depending on the visual layout of the page or pages).
+        json_output_spec = f"""Your JSON response should include a single key named `elements` that is a list of dicts, one for each element. Each of these element-specific dicts should include the keys listed below. These elements should be ordered as a human reader is meant to read them (generally from left to right and top to bottom, but might vary depending on the visual layout of the page or pages).
 
-   a. `type` (string): This must be one of the following values, according to the element type descriptions above.
+   1. `type` (string): This must be one of the following values, according to the element type descriptions above.
 
-      i. "body_text_section": One section of main body text (or all of the main body text on the page when there are no clear section breaks). Don't forget to capture the page or section heading, if any, which might be stylized in some way.
-      ii. "boxout": One section of boxout text
-      iii. "table": One table
-      iv. "chart": One chart or graph
-      v. "image": One image or figure (but remember that watermarks, backgrounds, and purely-decorative images should be ignored and not considered page elements in your JSON output)
-      vi. "footnote": One footnote
-      vii. "page_header": One page header
-      viii. "page_footer": One page footer
-      iv. "other": One other element that doesn't fit into one of the above categories
+      a. "body_text_section": One section of main body text (or all of the main body text on the page when there are no clear section breaks). Don't forget to capture the page or section heading, if any, which might be stylized in some way.
+      b. "boxout": One section of boxout text
+      c. "table": One table
+      d. "chart": One chart or graph
+      e. "image": One image or figure (but remember that watermarks, backgrounds, and purely-decorative images should be ignored and not considered page elements in your JSON output)
+      f. "footnote": One footnote
+      g. "page_header": One page header
+      h. "page_footer": One page footer
+      i. "other": One other element that doesn't fit into one of the above categories
 
-   b. `content` (string): This is the content of the element, in markdown format. The content should depend on the `type` as follows:
+   2. `content` (string): This is the content of the element, in markdown format. The content should depend on the `type` as follows:
 
-      i. "body_text_section": A markdown version of the text in the section, beginning with the section header (if any). The text should be verbatim, with no omissions, additions, or revisions other than to format the text in appropriate markdown syntax and remove soft hyphens that were added at the ends of lines when possible (and when the words are not naturally hyphenated). Do not add hyperlink formatting to the markdown.
-      ii. "boxout": A markdown version of the text in the section, beginning with the section header (if any). The text should be verbatim, with no omissions, additions, or revisions other than to format the text in appropriate markdown syntax and remove soft hyphens that were added at the ends of lines when possible (and when the words are not naturally hyphenated). Do not add hyperlink formatting to the markdown.
-      iii. "table": A markdown version of the complete table, including any title, column and row labels, cell text or data, and any end notes.
-      iv. "chart": Describe the chart or graph as if to a blind person, using markdown text and exact details and numbers whenever possible. Be sure to include any title, labels, notes, captions, or other information presented with the chart or graph (generally just above, below, or to the side of the chart or graph). Approximate numeric values from the visual elements, using the axes, in order to report the approximate numeric scale of features in the graph or chart.
-      v. "image": Describe the image or figure as if to a blind person, using markdown text and exact details and numbers whenever possible. Be sure to include any title, labels, notes, captions, or other information presented with the image or figure (generally just above, below, or to the side of the image or figure). Do not add hyperlink formatting to the markdown.
-      vi. "footnote": Markdown text with the exact footnote, including the number or label identifying the footnote.
-      vii. "page_header": Markdown text with the exact header.
-      viii. "page_footer": Markdown text with the exact footer.
-      iv. "other": Markdown text with the content of the element.
+      a. "body_text_section": A markdown version of the text in the section, beginning with the section header (if any). The text should be verbatim, with no omissions, additions, or revisions other than to format the text in appropriate markdown syntax and remove soft hyphens that were added at the ends of lines when possible (and when the words are not naturally hyphenated). Do not add hyperlink formatting to the markdown.
+      b. "boxout": A markdown version of the text in the section, beginning with the section header (if any). The text should be verbatim, with no omissions, additions, or revisions other than to format the text in appropriate markdown syntax and remove soft hyphens that were added at the ends of lines when possible (and when the words are not naturally hyphenated). Do not add hyperlink formatting to the markdown.
+      c. "table": A markdown version of the complete table, including any title, column and row labels, cell text or data, and any end notes.
+      d. "chart": Describe the chart or graph as if to a blind person, using markdown text and exact details and numbers whenever possible. Be sure to include any title, labels, notes, captions, or other information presented with the chart or graph (generally just above, below, or to the side of the chart or graph). Approximate numeric values from the visual elements, using the axes, in order to report the approximate numeric scale of features in the graph or chart.
+      e. "image": Describe the image or figure as if to a blind person, using markdown text and exact details and numbers whenever possible. Be sure to include any title, labels, notes, captions, or other information presented with the image or figure (generally just above, below, or to the side of the image or figure). Do not add hyperlink formatting to the markdown.
+      f. "footnote": Markdown text with the exact footnote, including the number or label identifying the footnote.
+      g. "page_header": Markdown text with the exact header.
+      h. "page_footer": Markdown text with the exact footer.
+      i. "other": Markdown text with the content of the element.
 
-Your JSON response with the `elements` object list (each with `type` and `content` keys):"""
+Be sure to follow these JSON instructions faithfully, returning a single `elements` object list (each with `type` and `content` keys)."""
 
-        # process each page
+        # process PDF to JSON
+        all_dicts = self.pdf_to_json(pdf_path, json_context, json_job, json_output_spec)
+
+        # aggregate all elements into a single list
         all_elements = []
-        for i, img in enumerate(images):
-            logging.log(logging.INFO, f"Processing page {i + 1}: Size={img.size}, Mode={img.mode}")
-
-            # encode image contents for OpenAI
-            encoded_image = base64.b64encode(PDFDocumentConverter.get_image_bytes(img)).decode('utf-8')
-            # call out to the LLM and process the returned JSON
-            response_text, response_dict = self.llm_interface.process_json_response(
-                self.llm_interface.llm_json_response_with_timeout([
-                    HumanMessage(content=[
-                        {"type": "text", "text": image_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
-                    ])]))
-
-            # output results
-            if response_dict is not None:
-                # get list of elements from the response dictionary
-                elements = response_dict['elements']
-
-                # log all returned elements
-                logging.log(logging.INFO, f"Returned elements for page {i + 1}: {json.dumps(elements, indent=2)}")
-
-                # add to running list of document elements
-                all_elements.extend(elements)
-            else:
-                logging.error(f"ERROR: No response from LLM")
+        for d in all_dicts:
+            all_elements.extend(d['elements'])
 
         # drop all headers and footers, re-order body text to flow continuously within sections
-        all_elements = self.clean_and_reorder_elements(all_elements)
+        all_elements = self._clean_and_reorder_elements(all_elements)
 
         # assemble and return markdown output
-        all_markdown = self.assemble_markdown(all_elements)
+        all_markdown = self._assemble_markdown(all_elements)
         return all_markdown
 
 
@@ -759,7 +960,7 @@ class ExcelDocumentConverter:
             return header_indicators >= 2
 
     @staticmethod
-    def excel_to_strftime_format(excel_format: str) -> str:
+    def _excel_to_strftime_format(excel_format: str) -> str:
         """
         Convert an Excel date format to a strftime format.
 
@@ -821,8 +1022,8 @@ class ExcelDocumentConverter:
                 from datetime import datetime
                 if isinstance(value, datetime):
                     # do our best to format dates and times as specified in the document, otherwise use a default format
-                    strftime_format = ExcelDocumentConverter.excel_to_strftime_format(cell.number_format
-                                                                                      or '%Y-%m-%d %H:%M:%S')
+                    strftime_format = ExcelDocumentConverter._excel_to_strftime_format(cell.number_format
+                                                                                       or '%Y-%m-%d %H:%M:%S')
                     return value.strftime(strftime_format)
                 return str(value)
             except:
@@ -921,7 +1122,7 @@ class ExcelDocumentConverter:
         return cell.row == merge_range.min_row and cell.column == merge_range.min_col
 
     @staticmethod
-    def create_markdown_table(sheet: Worksheet, table_range: ExcelContent.TableRange) -> str:
+    def _create_markdown_table(sheet: Worksheet, table_range: ExcelContent.TableRange) -> str:
         """
         Convert a table range to Markdown format.
 
@@ -1137,9 +1338,9 @@ class ExcelDocumentConverter:
                                 markdown_content.append(f'### {title}\n')
 
                         # convert table to markdown
-                        markdown_table = ExcelDocumentConverter.create_markdown_table(sheet, table)
+                        markdown_table = ExcelDocumentConverter._create_markdown_table(sheet, table)
                         if markdown_table:
-                            markdown_content.append(markdown_table + '\n')
+                            markdown_content.append(f"{markdown_table}\n")
 
                         last_end_row = max(last_end_row, table.end_row)
 
