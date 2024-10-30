@@ -1185,7 +1185,7 @@ class ExcelDocumentConverter:
                         # convert table to markdown
                         markdown_table = ExcelDocumentConverter._create_markdown_table(sheet, table)
                         if markdown_table:
-                            markdown_content.append(markdown_table + '\n')
+                            markdown_content.append(f"{markdown_table}\n")
 
                         last_end_row = max(last_end_row, table.end_row)
 
