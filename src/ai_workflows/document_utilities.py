@@ -81,6 +81,75 @@ class DocumentInterface:
         :rtype: str
         """
 
+        # use internal conversion function
+        return self._convert(filepath, to_format="md")
+
+    def convert_to_json(self, filepath: str, json_context: str, json_job: str, json_output_spec: str,
+                        markdown_first: bool = False) -> list[dict]:
+        """
+        Convert a document to JSON.
+
+        :param filepath: Path to the file.
+        :type filepath: str
+        :param json_context: Context for the LLM prompt used in JSON conversion (e.g., "The file contains a survey
+          instrument administered by trained enumerators to households in Zimbabwe."). (Required for JSON output.)
+        :type json_context: str
+        :param json_job: Description of the job to do for the LLM prompt used in JSON conversion (e.g., "Your job is to
+          extract each question or form field included in the text or page given."). (Required for JSON output.)
+        :type json_job: str
+        :param json_output_spec: JSON output specification for the LLM prompt (e.g., "Respond in correctly-formatted
+          JSON with a single key named `questions` that is a list of dicts, one for each question or form field, each
+          with the keys listed below..."). (Required for JSON output.)
+        :type json_output_spec: str
+        :param markdown_first: Whether to convert to Markdown first and then to JSON using an LLM. Default is False.
+          Set this to true if page-by-page conversion is not working well for elements that span pages; the
+          Markdown-first approach will convert page-by-page to Markdown and then convert to JSON as the next step.
+        :type markdown_first: bool
+        :return: List of dicts from page-level JSON results.
+        :rtype: list[dict]
+        """
+
+        # use internal conversion function
+        return self._convert(filepath, to_format="json" if not markdown_first else "mdjson",
+                             json_context=json_context, json_job=json_job, json_output_spec=json_output_spec)
+
+    def _convert(self, filepath: str, to_format: str = "md", json_context: str = "", json_job: str = "",
+                 json_output_spec: str = "") -> str | list[dict]:
+        """
+        Convert a document to Markdown or JSON.
+
+        :param filepath: Path to the file.
+        :type filepath: str
+        :param to_format: Format to convert to ("md" for Markdown, "json" for JSON, or "mdjson" for JSON from Markdown).
+          Default is "md" for Markdown. The "mdjson" option is a special case that converts to Markdown first and then
+          to JSON using an LLM. In contrast, the "json" option converts directly to JSON using an LLM when it can,
+          bypassing the Markdown step (but when it does, it processes the document page-by-page, which can lead to
+          worse results if elements span pages). Note that all JSON conversion requires an LLM interface be passed to
+          the DocumentInterface constructor.
+        :type to_format: str
+        :param json_context: Context for the LLM prompt used in JSON conversion (e.g., "The file contains a survey
+          instrument administered by trained enumerators to households in Zimbabwe."). (Required for JSON output.)
+        :type json_context: str
+        :param json_job: Description of the job to do for the LLM prompt used in JSON conversion (e.g., "Your job is to
+          extract each question or form field included in the text or page given."). (Required for JSON output.)
+        :type json_job: str
+        :param json_output_spec: JSON output specification for the LLM prompt (e.g., "Respond in correctly-formatted
+          JSON with a single key named `questions` that is a list of dicts, one for each question or form field, each
+          with the keys listed below..."). (Required for JSON output.)
+        :type json_output_spec: str
+        :return: Markdown output or list of dicts containing JSON results.
+        :rtype: str | list[dict]
+        """
+
+        # validate parameters
+        if to_format not in ["md", "json", "mdjson"]:
+            raise ValueError("Invalid 'to_format' parameter; must be 'md' for Markdown, 'json' for JSON, or 'mdjson' "
+                             "for JSON via Markdown.")
+        if to_format in ["json", "mdjson"] and (not json_context or not json_job or not json_output_spec):
+            raise ValueError("For JSON output, 'context', 'job_to_do', and 'output_format' parameters are required.")
+        if to_format in ["json", "mdjson"] and self.llm_interface is None:
+            raise ValueError("LLM interface required for JSON output.")
+
         # extract file extension
         ext = os.path.splitext(filepath)[1].lower()
 
@@ -88,33 +157,57 @@ class DocumentInterface:
         if self.llm_interface is not None:
             # always convert PDFs with the LLM
             if ext == '.pdf':
-                # convert PDF to markdown using LLM
+                # convert PDF using LLM
                 pdf_converter = PDFDocumentConverter(self.llm_interface)
-                return pdf_converter.pdf_to_markdown(filepath)
+                if to_format == "md":
+                    # convert to Markdown
+                    return pdf_converter.pdf_to_markdown(filepath)
+                elif to_format == "json":
+                    # convert directly to JSON
+                    return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec)
+                else:
+                    # convert to Markdown and then to JSON
+                    markdown = pdf_converter.pdf_to_markdown(filepath)
+                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
 
             # convert certain other file types to PDF to then convert with the LLM
             if ext in DocumentInterface.via_pdf_file_extensions:
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # convert to PDF in temporary directory
                     pdf_path = self.convert_to_pdf(filepath, temp_dir)
-                    # convert PDF to markdown using LLM
+                    # convert PDF using LLM
                     pdf_converter = PDFDocumentConverter(self.llm_interface)
-                    return pdf_converter.pdf_to_markdown(pdf_path)
+                    if to_format == "md":
+                        # convert to Markdown
+                        return pdf_converter.pdf_to_markdown(pdf_path)
+                    elif to_format == "json":
+                        # convert directly to JSON
+                        return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec)
+                    else:
+                        # convert to Markdown and then to JSON
+                        markdown = pdf_converter.pdf_to_markdown(pdf_path)
+                        return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
 
         # if Excel, see if we can convert to Markdown using our custom converter
         if ext == '.xlsx':
-            # convert Excel to Markdown using custom converter, trying at first to keep images and charts if we have
-            # an LLM available
+            # convert Excel to Markdown using custom converter
+            # (try to keep images and charts if we have an LLM available and we're after Markdown output)
             result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
-                                (filepath, lose_unsupported_content=not self.llm_interface))
+                                (filepath, lose_unsupported_content=(not (self.llm_interface and to_format == "md"))))
             if result:
-                return markdown
+                if to_format == "json":
+                    # if we're after JSON, convert the Markdown to JSON using the LLM
+                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
+                else:
+                    # otherwise, just return the Markdown
+                    return markdown
             else:
                 # log reason from returned Markdown
                 logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
 
-                # if we have an LLM, PDF it and then convert with LLM (otherwise we'll fall through to Unstructured)
-                if self.llm_interface is not None:
+                # if we have an LLM and we're after Markdown, PDF it and then convert with LLM if we can
+                # (we don't want to use an LLM on Excel files headed for JSON)
+                if self.llm_interface is not None and to_format == "md":
                     with (tempfile.TemporaryDirectory() as temp_dir):
                         # convert to PDF in temporary directory
                         pdf_path = self.convert_to_pdf(filepath, temp_dir)
@@ -140,11 +233,18 @@ class DocumentInterface:
 
         # otherwise, see if we can use PyMuPDFLLM to convert (includes .pdf, .txt, .svg, .cbz, .epub, .mobi, .xps)
         if ext in DocumentInterface.pymupdf_file_extensions:
-            return pymupdf4llm.to_markdown(filepath)
+            markdown = pymupdf4llm.to_markdown(filepath)
+        else:
+            # otherwise, use Unstructured to convert
+            doc_converter = UnstructuredDocumentConverter()
+            markdown = doc_converter.convert_to_markdown(filepath)
 
-        # otherwise, use Unstructured to convert
-        doc_converter = UnstructuredDocumentConverter()
-        return doc_converter.convert_to_markdown(filepath)
+        if to_format == "json":
+            # if we're after JSON, convert the Markdown to JSON using the LLM
+            return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
+        else:
+            # otherwise, just return the Markdown
+            return markdown
 
     @staticmethod
     def convert_to_pdf(filepath: str, output_dir: str) -> str:
@@ -173,6 +273,60 @@ class DocumentInterface:
 
         # return path to the converted PDF file
         return os.path.join(output_dir, os.path.splitext(os.path.basename(filepath))[0] + '.pdf')
+
+    def markdown_to_json(self, markdown: str, json_context: str, json_job: str, json_output_spec: str) -> list[dict]:
+        """
+        Convert Markdown text to JSON using an LLM.
+
+        :param json_context: Context for the LLM prompt (e.g., "The file contains a survey instrument administered by
+          trained enumerators to households in Zimbabwe.").
+        :type json_context: str
+        :param json_job: Job to do for the LLM prompt (e.g., "Your job is to extract each question or form field
+          included in the text.").
+        :type json_job: str
+        :param json_output_spec: Output format for the LLM prompt (e.g., "Respond in correctly-formatted JSON with a
+          single key named `questions` that is a list of dicts, one for each question or form field, each with the keys
+          listed below...").
+        :type json_output_spec: str
+        :return: List of dicts with JSON results (could be all results in one dict, could be split into multiple because
+          of page-by-page or other batched processing).
+        :rtype: list[dict]
+        """
+
+        # require LLM interface to continue
+        if self.llm_interface is None:
+            raise ValueError("LLM interface required for JSON conversion")
+
+        # set up for JSON processing
+        json_prompt = f"""Consider the Markdown text below, which has been extracted from a file.
+
+{json_context}
+
+{json_job}
+
+{json_output_spec}
+
+Markdown text enclosed by |@| delimiters:
+
+|@|{markdown}|@|
+
+Your JSON response precisely following the instructions given above the Markdown text:"""
+
+        # for now, process all in one go (assumes it all fits in the LLM context window)
+        response_text, response_dict = self.llm_interface.process_json_response(
+            self.llm_interface.llm_json_response_with_timeout(
+                [HumanMessage(content=[{"type": "text", "text": json_prompt}])]))
+
+        # raise exception if we didn't get a response
+        if response_dict is None:
+            logging.error(f"ERROR: Error extracting JSON from Markdown: {response_text}")
+            raise ValueError(f"Error extracting JSON from Markdown: {response_text}")
+
+        # log all returned elements
+        logging.info(f"Extracted JSON from Markdown: {json.dumps(response_dict, indent=2)}")
+
+        # return results
+        return [response_dict]
 
 
 class PDFDocumentConverter:
@@ -386,25 +540,24 @@ class PDFDocumentConverter:
         # return assembled markdown output with extra newlines at the end stripped out
         return markdown_output.strip()
 
-    def pdf_to_json(self, pdf_path: str, context: str, job_to_do: str, output_format: str) -> list[dict]:
+    def pdf_to_json(self, pdf_path: str, json_context: str, json_job: str, json_output_spec: str) -> list[dict]:
         """
-        Process a PDF file to extract elements and output JSON text.
+        Process a PDF file page-by-page to extract elements and output JSON text.
 
-        This function reads a PDF file, converts it to images, processes each image with an LLM, and assembles the
+        This function reads a PDF file, converts pages to images, processes each image with an LLM, and assembles the
         returned elements into a single JSON output.
 
         :param pdf_path: Path to the PDF file.
         :type pdf_path: str
-        :param context: Context for the LLM prompt (e.g., "Consider the attached image. It represents a single page
-          from a PDF file (or, sometimes, two facing pages) containing a survey instrument.")
-        :type context: str
-        :param job_to_do: Job to do for the LLM prompt (e.g., "Your job is to extract each question or form field
-          included on the page.")
-        :type job_to_do: str
-        :param output_format: Output format for the LLM prompt (e.g., "Respond in correctly-formatted JSON with a single
-            key named `questions` that is a list of dicts, one for each question or form field, each with the keys
-            listed below...")
-        :type output_format: str
+        :param json_context: Context for the LLM prompt (e.g., "The file contains a survey instrument.").
+        :type json_context: str
+        :param json_job: Job to do for the LLM prompt (e.g., "Your job is to extract each question or form field
+          included on the page."). In this case, the job will be to process each page, one at a time.
+        :type json_job: str
+        :param json_output_spec: Output format for the LLM prompt (e.g., "Respond in correctly-formatted JSON with a
+          single key named `questions` that is a list of dicts, one for each question or form field, each with the keys
+          listed below...").
+        :type json_output_spec: str
         :return: List of parsed results from all pages, one per page, in order.
         :rtype: list[dict]
         """
@@ -417,11 +570,13 @@ class PDFDocumentConverter:
         images = PDFDocumentConverter.pdf_to_images(pdf_path)
 
         # set up for image processing
-        image_prompt = f"""{context}
+        image_prompt = f"""Consider the attached image, which shows a single page (or, sometimes, two facing pages) from a PDF file.
 
-{job_to_do}
+{json_context}
 
-{output_format}
+{json_job}
+
+{json_output_spec}
 
 Your JSON response precisely following the instructions above:"""
 
@@ -475,9 +630,9 @@ Your JSON response precisely following the instructions above:"""
             return pymupdf4llm.to_markdown(pdf_path)
 
         # otherwise, we'll use the LLM to process the PDF
-        context = "Consider the attached image. It represents a single page from a PDF file (or, sometimes, two facing pages)."
+        json_context = "The page might include a mix of text, tables, figures, charts, images, or other elements."
 
-        job_to_do = f"""Your job is to:
+        json_job = f"""Your job is to:
 
 First, scan the image to identify each distinct element in the image, where each element is a part of the page that can be handled separately from the other parts of the page. Elements include, for example:
 
@@ -501,7 +656,7 @@ First, scan the image to identify each distinct element in the image, where each
 
 Then, respond in correctly-formatted JSON according to the format described below."""
 
-        output_format = f"""Your JSON response should include a single key named `elements` that is a list of dicts, one for each element. Each of these element-specific dicts should include the keys listed below. These elements should be ordered as a human reader is meant to read them (generally from left to right and top to bottom, but might vary depending on the visual layout of the page or pages).
+        json_output_spec = f"""Your JSON response should include a single key named `elements` that is a list of dicts, one for each element. Each of these element-specific dicts should include the keys listed below. These elements should be ordered as a human reader is meant to read them (generally from left to right and top to bottom, but might vary depending on the visual layout of the page or pages).
 
    1. `type` (string): This must be one of the following values, according to the element type descriptions above.
 
@@ -530,7 +685,7 @@ Then, respond in correctly-formatted JSON according to the format described belo
 Be sure to follow these JSON instructions faithfully, returning a single `elements` object list (each with `type` and `content` keys)."""
 
         # process PDF to JSON
-        all_dicts = self.pdf_to_json(pdf_path, context, job_to_do, output_format)
+        all_dicts = self.pdf_to_json(pdf_path, json_context, json_job, json_output_spec)
 
         # aggregate all elements into a single list
         all_elements = []
