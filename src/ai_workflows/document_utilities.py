@@ -105,9 +105,8 @@ class DocumentInterface:
         if ext == '.xlsx':
             # convert Excel to Markdown using custom converter, trying at first to keep images and charts if we have
             # an LLM available
-            result, markdown = ExcelDocumentConverter.convert_excel_to_markdown(filepath,
-                                                                                lose_unsupported_content
-                                                                                =not self.llm_interface)
+            result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
+                                (filepath, lose_unsupported_content=not self.llm_interface))
             if result:
                 return markdown
             else:
@@ -130,9 +129,8 @@ class DocumentInterface:
                             logging.info(f"{filepath} converted to {len(doc)} pages, which is over the limit "
                                          f"({DocumentInterface.max_xlsx_via_pdf_pages}); converting without images or "
                                          f"charts...")
-                            result, markdown = ExcelDocumentConverter.convert_excel_to_markdown(filepath,
-                                                                                                lose_unsupported_content
-                                                                                                =True)
+                            result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
+                                                (filepath, lose_unsupported_content=True))
                             if result:
                                 return markdown
                             else:
@@ -388,6 +386,75 @@ class PDFDocumentConverter:
         # return assembled markdown output with extra newlines at the end stripped out
         return markdown_output.strip()
 
+    def pdf_to_json(self, pdf_path: str, context: str, job_to_do: str, output_format: str) -> list[dict]:
+        """
+        Process a PDF file to extract elements and output JSON text.
+
+        This function reads a PDF file, converts it to images, processes each image with an LLM, and assembles the
+        returned elements into a single JSON output.
+
+        :param pdf_path: Path to the PDF file.
+        :type pdf_path: str
+        :param context: Context for the LLM prompt (e.g., "Consider the attached image. It represents a single page
+          from a PDF file (or, sometimes, two facing pages) containing a survey instrument.")
+        :type context: str
+        :param job_to_do: Job to do for the LLM prompt (e.g., "Your job is to extract each question or form field
+          included on the page.")
+        :type job_to_do: str
+        :param output_format: Output format for the LLM prompt (e.g., "Respond in correctly-formatted JSON with a single
+            key named `questions` that is a list of dicts, one for each question or form field, each with the keys
+            listed below...")
+        :type output_format: str
+        :return: List of parsed results from all pages, one per page, in order.
+        :rtype: list[dict]
+        """
+
+        # require LLM interface to continue
+        if self.llm_interface is None:
+            raise ValueError("LLM interface required for PDF to JSON conversion")
+
+        # convert PDF to images
+        images = PDFDocumentConverter.pdf_to_images(pdf_path)
+
+        # set up for image processing
+        image_prompt = f"""{context}
+
+{job_to_do}
+
+{output_format}
+
+Your JSON response precisely following the instructions above:"""
+
+        # process each page
+        all_dicts = []
+        logging.log(logging.INFO, f"Processing PDF {pdf_path} from {len(images)} images")
+        for i, img in enumerate(images):
+            logging.log(logging.INFO, f"Processing PDF page {i + 1}: Size={img.size}, Mode={img.mode}")
+
+            # encode image contents for OpenAI
+            encoded_image = base64.b64encode(PDFDocumentConverter._get_image_bytes(img)).decode('utf-8')
+            # call out to the LLM and process the returned JSON
+            response_text, response_dict = self.llm_interface.process_json_response(
+                self.llm_interface.llm_json_response_with_timeout([
+                    HumanMessage(content=[
+                        {"type": "text", "text": image_prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
+                    ])]))
+
+            # assemble results
+            if response_dict is not None:
+                # add response to running list of parsed results
+                all_dicts.append(response_dict)
+
+                # log all returned elements
+                logging.info(f"Extracted JSON for page {i + 1}: {json.dumps(response_dict, indent=2)}")
+            else:
+                logging.error(f"ERROR: Error extracting JSON from page {i+1}: {response_text}")
+                raise ValueError(f"Error extracting JSON from page {i+1} of {pdf_path}: {response_text}")
+
+        # return all results
+        return all_dicts
+
     def pdf_to_markdown(self, pdf_path: str) -> str:
         """
         Process a PDF file to extract elements and output Markdown text.
@@ -407,89 +474,68 @@ class PDFDocumentConverter:
             # since no LLM interface, use PyMuPDFLLM to convert PDF to Markdown
             return pymupdf4llm.to_markdown(pdf_path)
 
-        # otherwise, convert PDF to images
-        images = PDFDocumentConverter.pdf_to_images(pdf_path)
+        # otherwise, we'll use the LLM to process the PDF
+        context = "Consider the attached image. It represents a single page from a PDF file (or, sometimes, two facing pages)."
 
-        # set up for image processing
-        image_prompt = f"""Consider the attached image. It represents a single page from a PDF file (or, sometimes, two facing pages). 
+        job_to_do = f"""Your job is to:
 
-Your job is to:
+First, scan the image to identify each distinct element in the image, where each element is a part of the page that can be handled separately from the other parts of the page. Elements include, for example:
 
-1. Recognize each distinct element in the image, where each element is a part of the page that can be handled separately from the other parts of the page. Elements include, for example:
+   1. The main body text (if any), possibly separated into sections. This is the primary text of the page, which can begin on prior pages and/or continue on to future pages.
 
-   a. The main body text (if any), possibly separated into sections. This is the primary text of the page, which can begin on prior pages and/or continue on to future pages.
+   2. Boxout text (if any). These might be sidebars, callout boxes, or other separated sub-sections that are self-contained within the page.
 
-   b. Boxout text (if any). These might be sidebars, callout boxes, or other separated sub-sections that are self-contained within the page.
+   3. Tables (if any). These might include a title, the table itself, and, possibly, end notes or captions.
 
-   c. Tables (if any). These might include a title, the table itself, and, possibly, end notes or captions.
+   4. Charts or graphs (if any). These might include a title, the chart or graph itself, and, possibly, notes or captions just beneath the chart or graph.
 
-   d. Charts or graphs (if any). These might include a title, the chart or graph itself, and, possibly, notes or captions just beneath the chart or graph.
+   5. Image or figure (if any). These might include a title, the image or figure itself, and, possibly, notes or captions just beneath the image or figure.
 
-   e. Image or figure (if any). These might include a title, the image or figure itself, and, possibly, notes or captions just beneath the image or figure.
+   6. Footnotes (if any). These should include a note number or letter as well as text.
 
-   f. Footnotes (if any). These should include a note number or letter as well as text.
+   7. Page headers and footers (if any). These are the thin, one-or-two-line headers or footers that tend to appear at the top or bottom of pages, often with a title and page number. (Do not consider larger, more-substantive headers or footers with real page content to be headers and footers, but rather part of the main body text.)
 
-   g. Page headers and footers (if any). These are the thin, one-or-two-line headers or footers that tend to appear at the top or bottom of pages, often with a title and page number. (Do not consider larger, more-substantive headers or footers with real page content to be headers and footers, but rather part of the main body text.)
+   8. Watermarks or other background images or design elements that are purely decorative and are not needed to understand the meaning of the page content (if any). These you want to ignore completely.
 
-   h. Watermarks or other background images or design elements that are purely decorative and are not needed to understand the meaning of the page content (if any). These you want to ignore completely.
+   9. Other (if any). Any other content that doesn't fit into one of the categories above.
 
-   i. Other (if any). Any other content that doesn't fit into one of the categories above.
+Then, respond in correctly-formatted JSON according to the format described below."""
 
-2. Respond in correctly-formatted JSON with a single key named `elements` that is a list of dicts, one for each element, each with the keys listed below. These elements should be ordered as a human reader is meant to read them (generally from left to right and top to bottom, but might vary depending on the visual layout of the page or pages).
+        output_format = f"""Your JSON response should include a single key named `elements` that is a list of dicts, one for each element. Each of these element-specific dicts should include the keys listed below. These elements should be ordered as a human reader is meant to read them (generally from left to right and top to bottom, but might vary depending on the visual layout of the page or pages).
 
-   a. `type` (string): This must be one of the following values, according to the element type descriptions above.
+   1. `type` (string): This must be one of the following values, according to the element type descriptions above.
 
-      i. "body_text_section": One section of main body text (or all of the main body text on the page when there are no clear section breaks). Don't forget to capture the page or section heading, if any, which might be stylized in some way.
-      ii. "boxout": One section of boxout text
-      iii. "table": One table
-      iv. "chart": One chart or graph
-      v. "image": One image or figure (but remember that watermarks, backgrounds, and purely-decorative images should be ignored and not considered page elements in your JSON output)
-      vi. "footnote": One footnote
-      vii. "page_header": One page header
-      viii. "page_footer": One page footer
-      iv. "other": One other element that doesn't fit into one of the above categories
+      a. "body_text_section": One section of main body text (or all of the main body text on the page when there are no clear section breaks). Don't forget to capture the page or section heading, if any, which might be stylized in some way.
+      b. "boxout": One section of boxout text
+      c. "table": One table
+      d. "chart": One chart or graph
+      e. "image": One image or figure (but remember that watermarks, backgrounds, and purely-decorative images should be ignored and not considered page elements in your JSON output)
+      f. "footnote": One footnote
+      g. "page_header": One page header
+      h. "page_footer": One page footer
+      i. "other": One other element that doesn't fit into one of the above categories
 
-   b. `content` (string): This is the content of the element, in markdown format. The content should depend on the `type` as follows:
+   2. `content` (string): This is the content of the element, in markdown format. The content should depend on the `type` as follows:
 
-      i. "body_text_section": A markdown version of the text in the section, beginning with the section header (if any). The text should be verbatim, with no omissions, additions, or revisions other than to format the text in appropriate markdown syntax and remove soft hyphens that were added at the ends of lines when possible (and when the words are not naturally hyphenated). Do not add hyperlink formatting to the markdown.
-      ii. "boxout": A markdown version of the text in the section, beginning with the section header (if any). The text should be verbatim, with no omissions, additions, or revisions other than to format the text in appropriate markdown syntax and remove soft hyphens that were added at the ends of lines when possible (and when the words are not naturally hyphenated). Do not add hyperlink formatting to the markdown.
-      iii. "table": A markdown version of the complete table, including any title, column and row labels, cell text or data, and any end notes.
-      iv. "chart": Describe the chart or graph as if to a blind person, using markdown text and exact details and numbers whenever possible. Be sure to include any title, labels, notes, captions, or other information presented with the chart or graph (generally just above, below, or to the side of the chart or graph). Approximate numeric values from the visual elements, using the axes, in order to report the approximate numeric scale of features in the graph or chart.
-      v. "image": Describe the image or figure as if to a blind person, using markdown text and exact details and numbers whenever possible. Be sure to include any title, labels, notes, captions, or other information presented with the image or figure (generally just above, below, or to the side of the image or figure). Do not add hyperlink formatting to the markdown.
-      vi. "footnote": Markdown text with the exact footnote, including the number or label identifying the footnote.
-      vii. "page_header": Markdown text with the exact header.
-      viii. "page_footer": Markdown text with the exact footer.
-      iv. "other": Markdown text with the content of the element.
+      a. "body_text_section": A markdown version of the text in the section, beginning with the section header (if any). The text should be verbatim, with no omissions, additions, or revisions other than to format the text in appropriate markdown syntax and remove soft hyphens that were added at the ends of lines when possible (and when the words are not naturally hyphenated). Do not add hyperlink formatting to the markdown.
+      b. "boxout": A markdown version of the text in the section, beginning with the section header (if any). The text should be verbatim, with no omissions, additions, or revisions other than to format the text in appropriate markdown syntax and remove soft hyphens that were added at the ends of lines when possible (and when the words are not naturally hyphenated). Do not add hyperlink formatting to the markdown.
+      c. "table": A markdown version of the complete table, including any title, column and row labels, cell text or data, and any end notes.
+      d. "chart": Describe the chart or graph as if to a blind person, using markdown text and exact details and numbers whenever possible. Be sure to include any title, labels, notes, captions, or other information presented with the chart or graph (generally just above, below, or to the side of the chart or graph). Approximate numeric values from the visual elements, using the axes, in order to report the approximate numeric scale of features in the graph or chart.
+      e. "image": Describe the image or figure as if to a blind person, using markdown text and exact details and numbers whenever possible. Be sure to include any title, labels, notes, captions, or other information presented with the image or figure (generally just above, below, or to the side of the image or figure). Do not add hyperlink formatting to the markdown.
+      f. "footnote": Markdown text with the exact footnote, including the number or label identifying the footnote.
+      g. "page_header": Markdown text with the exact header.
+      h. "page_footer": Markdown text with the exact footer.
+      i. "other": Markdown text with the content of the element.
 
-Your JSON response with the `elements` object list (each with `type` and `content` keys):"""
+Be sure to follow these JSON instructions faithfully, returning a single `elements` object list (each with `type` and `content` keys)."""
 
-        # process each page
+        # process PDF to JSON
+        all_dicts = self.pdf_to_json(pdf_path, context, job_to_do, output_format)
+
+        # aggregate all elements into a single list
         all_elements = []
-        for i, img in enumerate(images):
-            logging.log(logging.INFO, f"Processing page {i + 1}: Size={img.size}, Mode={img.mode}")
-
-            # encode image contents for OpenAI
-            encoded_image = base64.b64encode(PDFDocumentConverter._get_image_bytes(img)).decode('utf-8')
-            # call out to the LLM and process the returned JSON
-            response_text, response_dict = self.llm_interface.process_json_response(
-                self.llm_interface.llm_json_response_with_timeout([
-                    HumanMessage(content=[
-                        {"type": "text", "text": image_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
-                    ])]))
-
-            # output results
-            if response_dict is not None:
-                # get list of elements from the response dictionary
-                elements = response_dict['elements']
-
-                # log all returned elements
-                logging.log(logging.INFO, f"Returned elements for page {i + 1}: {json.dumps(elements, indent=2)}")
-
-                # add to running list of document elements
-                all_elements.extend(elements)
-            else:
-                logging.error(f"ERROR: No response from LLM")
+        for d in all_dicts:
+            all_elements.extend(d['elements'])
 
         # drop all headers and footers, re-order body text to flow continuously within sections
         all_elements = self._clean_and_reorder_elements(all_elements)

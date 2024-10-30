@@ -22,6 +22,7 @@ import concurrent.futures
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import json
 import os
+import logging
 
 
 class LLMInterface:
@@ -173,7 +174,7 @@ class LLMInterface:
         if response['raw'].type == "ERROR":
             # if we caught an error, report and save that error, then move on
             final_response = response['raw'].content
-            print(f"Error from LLM: {final_response}")
+            logging.warning(f"Error from LLM: {final_response}")
         elif 'parsed' in response and response['parsed'] is not None:
             # if we got a parsed version, save the JSON version of that
             final_response = json.dumps(response['parsed'])
@@ -181,10 +182,10 @@ class LLMInterface:
         elif 'parsing_error' in response and response['parsing_error'] is not None:
             # if there was a parsing error, report and save that error, then move on
             final_response = str(response['parsing_error'])
-            print(f"Parsing error : {final_response}")
+            logging.warning(f"Parsing error : {final_response}")
         else:
             final_response = ""
-            print(f"Unknown response from LLM")
+            logging.warning(f"Unknown response from LLM")
 
         # return response in both raw and parsed formats
         return final_response, parsed_response
