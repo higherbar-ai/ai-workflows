@@ -1,0 +1,80 @@
+Note: These sample DHS survey questions were extracted from https://dhsprogram.com/pubs/pdf/DHSQ8/DHS8_Womans_QRE_EN_14Feb2023_DHSQ8.pdf on Oct. 5, 2024, following a link from https://dhsprogram.com/publications/publication-DHSQ8-DHS-Questionnaires-and-Manuals.cfm.
+
+**Section 11: Other Health Issues**
+
+- **Now I would like to ask you some questions on smoking and tobacco use. Do you currently smoke cigarettes every day, some days, or not at all?**
+  - (1) Every day
+  - (2) Some days
+  - (3) Not at all
+
+- **On average, how many cigarettes do you currently smoke each day?**
+  - [Numeric response expected]
+
+- **Do you currently smoke or use any other type of tobacco every day, some days, or not at all?**
+  - (1) Every day
+  - (2) Some days
+  - (3) Not at all
+
+- **What other type of tobacco do you currently smoke or use?**
+  - (A) Kreteks
+  - (B) Pipes full of tobacco
+  - (C) Cigars, cheroots, or cigarillos
+  - (D) Water pipe
+  - (E) Snuff by mouth
+  - (F) Snuff by nose
+  - (G) Chewing tobacco
+  - (H) Betel quid with tobacco
+  - (X) Other
+
+- **Now I would like to ask you some questions about drinking alcohol. Have you ever consumed any alcohol, such as beer, wine, spirits, or [ADD OTHER LOCAL EXAMPLES]?**
+  - (1) Yes
+  - (2) No
+
+- **During the last one month, on how many days did you have an alcoholic drink?**
+  - [Numeric response for number of days]
+  - (00) Did not drink alcohol
+
+- **We count one drink of alcohol as one can or bottle of beer, one glass of wine, one shot of spirits, or one cup of [ADD OTHER LOCAL EXAMPLES]. In the last one month, on the days that you drank alcohol, how many drinks did you usually have per day?**
+  - [Numeric response for number of drinks]
+  - (95) Every day/almost every day
+
+- **Many different factors can prevent women from getting medical advice or treatment for themselves. When you are sick and want to get medical advice or treatment, is each of the following a big problem or not a big problem?**
+  - (a) Getting permission to go to the doctor
+    - (1) Big problem
+    - (2) Not a big problem
+  - (b) Getting money needed for advice or treatment
+    - (1) Big problem
+    - (2) Not a big problem
+  - (c) The distance to the health facility
+    - (1) Big problem
+    - (2) Not a big problem
+  - (d) Not wanting to go alone
+    - (1) Big problem
+    - (2) Not a big problem
+
+- **Are you covered by any health insurance?**
+  - (1) Yes
+  - (2) No
+
+- **What type of health insurance are you covered by?**
+  - (A) Mutual health organization/community-based health insurance
+  - (B) Health insurance through employer
+  - (C) Social security
+  - (D) Other privately purchased commercial health insurance
+  - (X) Other
+
+- **How long does it take in minutes to go from your home to the nearest healthcare facility, which could be a hospital, a health clinic, a medical doctor, or a health post?**
+  - [Numeric response in minutes]
+
+- **How do you travel to this healthcare facility from your home?**
+  - [Instructions to record the mode of travel mentioned]
+
+- **Now I’m going to ask you about tests a healthcare worker can do to check for cervical cancer, which is cancer in the cervix. The cervix connects the womb to the vagina. To be checked for cervical cancer, a woman is asked to lie on her back with her legs apart. Then the healthcare worker will use a brush or swab to collect a sample from inside her. The sample is sent to a laboratory for testing. This test is called a Pap smear or HPV test. Another method is called a VIA or Visual Inspection with Acetic Acid. In this test, the healthcare worker puts vinegar on the cervix to see if there is a reaction.**
+
+  **Has a doctor or other healthcare worker ever tested you for cervical cancer?**
+  - (1) Yes
+  - (2) No
+
+- **Has a doctor or other healthcare provider examined your breasts to check for breast cancer?**
+  - (1) Yes
+  - (2) No

@@ -15,7 +15,7 @@
 """Utilities for reading and processing documents for AI workflows."""
 
 from ai_workflows.llm_utilities import LLMInterface
-import fitz  # (this is PyMuPDF)
+import fitz  # (PyMuPDF)
 from fitz.utils import get_pixmap
 import pymupdf4llm
 from PIL import Image
@@ -41,6 +41,7 @@ from pathlib import Path
 import re
 import tempfile
 import logging
+import tiktoken
 
 
 class DocumentInterface:
@@ -57,6 +58,8 @@ class DocumentInterface:
         ".uop", ".uos", ".uot", ".vsd", ".vsdx", ".wdb", ".wps", ".wri", ".xls", ".xlsx"
     ]
     max_xlsx_via_pdf_pages: int = 10
+    max_json_via_markdown_pages = 50
+    max_json_via_markdown_tokens = 25000
 
     def __init__(self, llm_interface: LLMInterface = None):
         """
@@ -85,7 +88,7 @@ class DocumentInterface:
         return self._convert(filepath, to_format="md")
 
     def convert_to_json(self, filepath: str, json_context: str, json_job: str, json_output_spec: str,
-                        markdown_first: bool = False) -> list[dict]:
+                        markdown_first: Optional[bool] = None) -> list[dict]:
         """
         Convert a document to JSON.
 
@@ -101,13 +104,52 @@ class DocumentInterface:
           JSON with a single key named `questions` that is a list of dicts, one for each question or form field, each
           with the keys listed below..."). (Required for JSON output.)
         :type json_output_spec: str
-        :param markdown_first: Whether to convert to Markdown first and then to JSON using an LLM. Default is False.
-          Set this to true if page-by-page conversion is not working well for elements that span pages; the
-          Markdown-first approach will convert page-by-page to Markdown and then convert to JSON as the next step.
-        :type markdown_first: bool
+        :param markdown_first: Whether to convert to Markdown first and then to JSON using an LLM. Set this to true if
+          page-by-page conversion is not working well for elements that span pages; the Markdown-first approach will
+          convert page-by-page to Markdown and then convert to JSON as the next step. When going the Markdown route,
+          the JSON conversion will take place in a single step, with all of the Markdown supplied at once — so it
+          won't work if the file Markdown is too large to fit in the LLM context window. The default is None, which will
+          use the Markdown path for smaller PDF files and the page-by-page path for larger ones.
+        :type markdown_first: Optional[bool]
         :return: List of dicts from page-level JSON results.
         :rtype: list[dict]
         """
+
+        if markdown_first is None:
+            # figure out whether we should convert to Markdown page-by-page and then JSON all in one go or convert
+            # to JSON page-by-page directly
+
+            # extract file extension
+            ext = os.path.splitext(filepath)[1].lower()
+
+            # if we're going to convert from PDF using an LLM, we need to figure out the right choice
+            if self.llm_interface and (ext == '.pdf' or ext in DocumentInterface.via_pdf_file_extensions):
+                # use Unstructured to convert to Markdown
+                doc_converter = UnstructuredDocumentConverter()
+                markdown = doc_converter.convert_to_markdown(filepath)
+
+                # if PDF doesn't have much text, it might be scanned or image-based and require OCR
+                if len(markdown) < 200 and ext == '.pdf':
+                    # check number of PDF pages and decide whether to use Markdown or direct-to-JSON
+                    doc = fitz.open(filepath)
+                    if len(doc) <= DocumentInterface.max_json_via_markdown_pages:
+                        # if we're within the limit, use Markdown conversion first
+                        markdown_first = True
+                    else:
+                        # if we're over the limit, use page-by-page JSON conversion
+                        markdown_first = False
+                else:
+                    # use tokens to decide
+                    encoding = tiktoken.encoding_for_model(self.llm_interface.llm.model_name)
+                    if len(encoding.encode(markdown)) <= DocumentInterface.max_json_via_markdown_tokens:
+                        # if we're within the limit, use Markdown conversion first
+                        markdown_first = True
+                    else:
+                        # if we're over the limit, use page-by-page JSON conversion
+                        markdown_first = False
+            else:
+                # for other file types or without an LLM, they always use Markdown first anyway
+                markdown_first = True
 
         # use internal conversion function
         return self._convert(filepath, to_format="json" if not markdown_first else "mdjson",
@@ -278,6 +320,8 @@ class DocumentInterface:
         """
         Convert Markdown text to JSON using an LLM.
 
+        :param markdown: Markdown text to convert to JSON.
+        :type markdown: str
         :param json_context: Context for the LLM prompt (e.g., "The file contains a survey instrument administered by
           trained enumerators to households in Zimbabwe.").
         :type json_context: str
