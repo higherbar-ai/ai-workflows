@@ -140,7 +140,7 @@ class DocumentInterface:
                         markdown_first = False
                 else:
                     # use tokens to decide
-                    encoding = tiktoken.encoding_for_model(self.llm_interface.llm.model_name)
+                    encoding = tiktoken.encoding_for_model(self.llm_interface.model)
                     if len(encoding.encode(markdown)) <= DocumentInterface.max_json_via_markdown_tokens:
                         # if we're within the limit, use Markdown conversion first
                         markdown_first = True
