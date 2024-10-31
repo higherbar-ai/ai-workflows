@@ -35,6 +35,7 @@ class LLMInterface:
     seconds_between_retries: int
     llm: ChatOpenAI | AzureChatOpenAI | None
     json_llm: Runnable | None
+    model: str = ""
 
     def __init__(self, openai_api_key: str = None, openai_model: str = None, temperature: float = 0.0,
                  total_response_timeout_seconds: int = 600, number_of_retries: int = 2,
@@ -61,7 +62,8 @@ class LLMInterface:
         :type seconds_between_retries: int
         :param azure_api_key: API key for Azure LLM. Default is None.
         :type azure_api_key: str
-        :param azure_api_engine: Azure API engine name. Default is None.
+        :param azure_api_engine: Azure API engine name (deployment name; assumed to be the same as the OpenAI model
+          name). Default is None.
         :type azure_api_engine: str
         :param azure_api_base: Azure API base URL. Default is None.
         :type azure_api_base: str
@@ -97,8 +99,12 @@ class LLMInterface:
             self.llm = AzureChatOpenAI(openai_api_key=azure_api_key, temperature=temperature,
                                        deployment_name=azure_api_engine, azure_endpoint=azure_api_base,
                                        openai_api_version=azure_api_version, openai_api_type="azure")
+            # assume model is the engine name for Azure
+            self.model = azure_api_engine
         else:
             self.llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=temperature, model_name=openai_model)
+            # assume model is the model name for OpenAI
+            self.model = openai_model
         self.json_llm = self.llm.with_structured_output(method="json_mode", include_raw=True)
 
     def llm_json_response(self, prompt: str | list) -> dict | None:
