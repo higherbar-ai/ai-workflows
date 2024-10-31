@@ -56,6 +56,11 @@ Here are the basics:
    be used to help with high-quality conversion.
 #. The ``example-google-colab-document-processing.ipynb`` notebook provides a simple Google Colab example of how to use
    the ``document_utilities`` module to convert files to Markdown format.
+#. The ``example-google-colab-surveyeval-lite.ipynb`` notebook provides a more realistic workflow example that uses
+   the ``document_utilities`` module to convert a survey file to Markdown format and then to JSON format, and then
+   uses the ``llm_utilities`` module to evaluate survey questions using an LLM.
+#. The ``example-surveyeval-lite.ipynb`` notebook provides the same example, but in a Jupyter notebook that can be run
+   locally.
 #. The ``example-testing.ipynb`` notebook provides a basic set-up for testing Markdown conversion methods (LLM-assisted
    vs. not-LLM-assisted).
 
@@ -67,6 +72,12 @@ Typical usage::
     llm_interface = LLMInterface(openai_api_key=openai_api_key)
     doc_interface = DocumentInterface(llm_interface=llm_interface)
     markdown = doc_interface.convert_to_markdown(file_path)
+    dict_list = doc_interface.convert_to_json(
+        file_path,
+        json_context = "The file contains a survey instrument with questions to be administered to rural Zimbabwean household heads by a trained enumerator.",
+        json_job = "Your job is to extract questions and response options from the survey instrument.",
+        json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
+    )
 
 Technical notes
 ---------------
@@ -105,6 +116,34 @@ The ``DocumentInterface.convert_to_markdown()`` method uses one of several metho
    the ``Unstructured`` library to parse the file into elements and then add basic Markdown formatting. This method is
    fast and cheap, but it's also the least accurate.
 
+JSON conversion
+^^^^^^^^^^^^^^^
+
+You can convert from Markdown to JSON using the ``DocumentInterface.markdown_to_json()`` method, or you can convert
+files directly to JSON using the ``DocumentInterface.convert_to_json()`` method. The latter method will most often
+convert to Markdown first and then to JSON, but it will convert straight to JSON with a page-by-page approach if:
+
+#. The ``markdown_first`` parameter is explicitly provided as ``False`` and converting the file to Markdown would
+   naturally use an LLM with a page-by-page approach (see the section above)
+#. Or: converting the file to Markdown would naturally use an LLM with a page-by-page approach,
+   the ``markdown_first`` parameter is not explicitly provided as ``True``, and the file's content doesn't look too
+   large to fit in the LLM context window (<= 50 pages or 25,000 tokens).
+
+The advantage of converting to JSON directly, bypassing the Markdown step, is that you can handle files of arbitrary
+size. However, the page-by-page approach can work poorly for elements that span pages (since JSON conversion happens
+page-by-page).
+
+Whether or not you convert to JSON via Markdown, JSON conversion always uses LLM assistance. The parameters you supply
+are:
+
+#. ``json_context``: a description of the file's content, to help the LLM understand what it's looking at
+#. ``json_job``: a description of the task you want the LLM to perform (e.g., extracting survey questions)
+#. ``json_output_spec``: a description of the output you expect from the LLM
+
+The more detail you provide, the better the LLM will do at the JSON conversion.
+
+If you find that things aren't working well, try including some few-shot examples in the ``json_output_spec`` parameter.
+
 Roadmap
 -------
 
@@ -114,7 +153,6 @@ There's much that can be improved here. For example:
 * Tracking and reporting LLM costs
 * Improving evaluation and comparison methods
 * Parallelizing LLM calls for faster processing
-* Adding support for reading documents as JSON rather than Markdown (using an LLM parsing layer)
 * Adding Claude and AWS Bedrock support
 * Adding OCR support for PDF files when an LLM isn't available
 
