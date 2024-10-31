@@ -124,9 +124,9 @@ class DocumentInterface:
 
             # if we're going to convert from PDF using an LLM, we need to figure out the right choice
             if self.llm_interface and (ext == '.pdf' or ext in DocumentInterface.via_pdf_file_extensions):
-                # use Unstructured to convert to Markdown
-                doc_converter = UnstructuredDocumentConverter()
-                markdown = doc_converter.convert_to_markdown(filepath)
+                # convert to Markdown without LLM assistance
+                doc_interface_no_llm = DocumentInterface()
+                markdown = doc_interface_no_llm.convert_to_markdown(filepath)
 
                 # if PDF doesn't have much text, it might be scanned or image-based and require OCR
                 if len(markdown) < 200 and ext == '.pdf':
@@ -281,7 +281,7 @@ class DocumentInterface:
             doc_converter = UnstructuredDocumentConverter()
             markdown = doc_converter.convert_to_markdown(filepath)
 
-        if to_format == "json":
+        if to_format in ["json", "mdjson"]:
             # if we're after JSON, convert the Markdown to JSON using the LLM
             return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
         else:
