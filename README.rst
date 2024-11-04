@@ -2,7 +2,7 @@
 ai_workflows
 ============
 
-This repository contains a toolkit for AI workflows (i.e., workflows that are pre-scripted and repeatable, but utilize
+The ``ai_workflows`` package is a toolkit for AI workflows (i.e., workflows that are pre-scripted and repeatable, but utilize
 LLMs for various tasks). It's still in early development, but is ready to support piloting and experimentation.
 
 Installation
@@ -153,7 +153,7 @@ There's much that can be improved here. For example:
 * Tracking and reporting LLM costs
 * Improving evaluation and comparison methods
 * Parallelizing LLM calls for faster processing
-* Adding Claude and AWS Bedrock support
+* Adding Claude and AWS Bedrock support (and trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_)
 * Adding OCR support for PDF files when an LLM isn't available
 
 Credits
