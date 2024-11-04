@@ -16,7 +16,7 @@
 
 from langchain_openai.chat_models.base import ChatOpenAI
 from langchain_openai.chat_models.azure import AzureChatOpenAI
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
 from langchain_core.runnables import Runnable
 import concurrent.futures
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
@@ -36,12 +36,14 @@ class LLMInterface:
     llm: ChatOpenAI | AzureChatOpenAI | None
     json_llm: Runnable | None
     model: str = ""
+    json_retries: int = 2
 
     def __init__(self, openai_api_key: str = None, openai_model: str = None, temperature: float = 0.0,
                  total_response_timeout_seconds: int = 600, number_of_retries: int = 2,
                  seconds_between_retries: int = 5, azure_api_key: str = None, azure_api_engine: str = None,
                  azure_api_base: str = None, azure_api_version: str = None, langsmith_api_key: str = None,
-                 langsmith_project: str = 'ai_workflows', langsmith_endpoint: str = 'https://api.smith.langchain.com'):
+                 langsmith_project: str = 'ai_workflows', langsmith_endpoint: str = 'https://api.smith.langchain.com',
+                 json_retries: int = 2):
         """
         Initialize the LLM interface for LLM interactions.
 
@@ -75,6 +77,8 @@ class LLMInterface:
         :type langsmith_project: str
         :param langsmith_endpoint: LangSmith endpoint URL. Default is 'https://api.smith.langchain.com'.
         :type langsmith_endpoint: str
+        :param json_retries: Number of automatic retries for invalid JSON responses. Default is 2.
+        :type json_retries: int
         """
 
         # validate parameters
@@ -93,6 +97,7 @@ class LLMInterface:
         self.total_response_timeout_seconds = total_response_timeout_seconds
         self.number_of_retries = number_of_retries
         self.seconds_between_retries = seconds_between_retries
+        self.json_retries = json_retries
 
         # initialize LangChain LLM access
         if azure_api_key:
@@ -122,6 +127,32 @@ class LLMInterface:
         # execute LLM evaluation, but catch and return any exceptions
         try:
             result = self.json_llm.invoke(prompt)
+
+            if 'parsing_error' in result and result['parsing_error'] is not None and self.json_retries > 0:
+                # if there was a parsing error, retry up to the allowed number of times
+                retries = 0
+                while retries < self.json_retries:
+                    if isinstance(prompt, str):
+                        # if the prompt was a string, convert to list for the retry
+                        retry_prompt = [HumanMessage(content=prompt)]
+                    else:
+                        # otherwise, make copy of the prompt list for retry
+                        retry_prompt = prompt.copy()
+                    # add original response
+                    retry_prompt.append(AIMessage(content=result['raw'].content))
+                    # add retry prompt
+                    retry_prompt.append(HumanMessage(content=f"Your JSON response was invalid. Please correct it "
+                                                             f"and respond with valid JSON (with no code block "
+                                                             f"or other content). Just 100% valid JSON, according "
+                                                             f"to the instructions given:"))
+
+                    # retry
+                    result = self.json_llm.invoke(retry_prompt)
+                    retries += 1
+
+                    # break if we got a valid response, otherwise keep going till we run out of retries
+                    if 'parsing_error' not in result or result['parsing_error'] is None:
+                        break
         except Exception as caught_e:
             # format error result like success result
             result = {"raw": BaseMessage(type="ERROR", content=f"{caught_e}")}
