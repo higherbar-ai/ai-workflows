@@ -95,7 +95,9 @@ automatically when used to convert documents to JSON. See below for more details
 By default, the ``LLMInterface`` class will retry twice if an LLM response doesn't parse as JSON or match the schema
 provided (if any), but you can change this behavior by specifying the ``json_retries`` parameter in the constructor.
 
-Currently, the ``LLMInterface`` class only works with OpenAI models, either directly from OpenAI or via Azure. Claude support (directly or via AWS Bedrock) is next up on the roadmap, followed by other models as requested.
+Currently, the ``LLMInterface`` class supports OpenAI models, either directly from OpenAI or via Azure, or the
+Anthropic models, either directly or via AWS Bedrock. However: currently Anthropic's models are rejecting images over
+5MB, which is a problem for document conversion.
 
 Markdown conversion
 ^^^^^^^^^^^^^^^^^^^
@@ -166,7 +168,8 @@ There's much that can be improved here. For example:
 * Tracking and reporting LLM costs
 * Improving evaluation and comparison methods
 * Parallelizing LLM calls for faster processing
-* Adding Claude and AWS Bedrock support (and trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_)
+* Dealing with Claude's 5MB image limit
+* Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
 * Adding OCR support for PDF files when an LLM isn't available
 
 Credits

@@ -385,15 +385,14 @@ Your JSON response precisely following the instructions given above the Markdown
                 JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
 
         # for now, process all in one go (assumes it all fits in the LLM context window)
-        response_text, response_dict = self.llm_interface.process_json_response(
-            self.llm_interface.llm_json_response_with_timeout(
+        response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(
                 prompt=[HumanMessage(content=[{"type": "text", "text": json_prompt}])],
-                json_validation_schema=json_output_schema))
+                json_validation_schema=json_output_schema)
 
-        # raise exception if we didn't get a response
-        if response_dict is None:
-            logging.error(f"ERROR: Error extracting JSON from Markdown: {response_text}")
-            raise ValueError(f"Error extracting JSON from Markdown: {response_text}")
+        # raise exception on error
+        if error:
+            logging.error(f"ERROR: Error extracting JSON from Markdown: {error}")
+            raise RuntimeError(f"Error extracting JSON from Markdown: {error}")
 
         # log all returned elements
         logging.info(f"Extracted JSON from Markdown: {json.dumps(response_dict, indent=2)}")
@@ -679,23 +678,22 @@ Your JSON response precisely following the instructions above:"""
             # encode image contents for OpenAI
             encoded_image = base64.b64encode(PDFDocumentConverter._get_image_bytes(img)).decode('utf-8')
             # call out to the LLM and process the returned JSON
-            response_text, response_dict = self.llm_interface.process_json_response(
-                self.llm_interface.llm_json_response_with_timeout(prompt=[
+            response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(prompt=[
                     HumanMessage(content=[
                         {"type": "text", "text": image_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
-                    ])], json_validation_schema=json_output_schema))
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded_image}"}},
+                    ])], json_validation_schema=json_output_schema)
 
-            # assemble results
-            if response_dict is not None:
-                # add response to running list of parsed results
-                all_dicts.append(response_dict)
+            # raise exception on error
+            if error:
+                logging.error(f"ERROR: Error extracting JSON from page {i+1}: {error}")
+                raise RuntimeError(f"Error extracting JSON from page {i+1} of {pdf_path}: {error}")
 
-                # log all returned elements
-                logging.info(f"Extracted JSON for page {i + 1}: {json.dumps(response_dict, indent=2)}")
-            else:
-                logging.error(f"ERROR: Error extracting JSON from page {i+1}: {response_text}")
-                raise ValueError(f"Error extracting JSON from page {i+1} of {pdf_path}: {response_text}")
+            # otherwise, add response to running list of parsed results
+            all_dicts.append(response_dict)
+
+            # log all returned elements
+            logging.info(f"Extracted JSON for page {i + 1}: {json.dumps(response_dict, indent=2)}")
 
         # return all results
         return all_dicts

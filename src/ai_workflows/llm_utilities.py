@@ -17,13 +17,14 @@
 from langchain_openai.chat_models.base import ChatOpenAI
 from langchain_openai.chat_models.azure import AzureChatOpenAI
 from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
-from langchain_core.runnables import Runnable
 import concurrent.futures
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import json
 import os
-import logging
 from jsonschema import validate, ValidationError, SchemaError
+from langchain_aws import ChatBedrock
+from langchain_anthropic import ChatAnthropic
+import re
 
 
 class LLMInterface:
@@ -35,7 +36,6 @@ class LLMInterface:
     number_of_retries: int
     seconds_between_retries: int
     llm: ChatOpenAI | AzureChatOpenAI | None
-    json_llm: Runnable | None
     model: str = ""
     json_retries: int = 2
 
@@ -44,7 +44,8 @@ class LLMInterface:
                  seconds_between_retries: int = 5, azure_api_key: str = None, azure_api_engine: str = None,
                  azure_api_base: str = None, azure_api_version: str = None, langsmith_api_key: str = None,
                  langsmith_project: str = 'ai_workflows', langsmith_endpoint: str = 'https://api.smith.langchain.com',
-                 json_retries: int = 2):
+                 json_retries: int = 2, anthropic_api_key: str = None, anthropic_model: str = None,
+                 bedrock_model: str = None, bedrock_region: str = "us-east-1", bedrock_aws_profile: str = None):
         """
         Initialize the LLM interface for LLM interactions.
 
@@ -80,11 +81,17 @@ class LLMInterface:
         :type langsmith_endpoint: str
         :param json_retries: Number of automatic retries for invalid JSON responses. Default is 2.
         :type json_retries: int
+        :param anthropic_api_key: API key for Anthropic. Default is None.
+        :type anthropic_api_key: str
+        :param anthropic_model: Anthropic model name. Default is None.
+        :type anthropic_model: str
+        :param bedrock_model: AWS Bedrock model name. Default is None.
+        :type bedrock_model: str
+        :param bedrock_region: AWS Bedrock region. Default is "us-east-1".
+        :type bedrock_region: str
+        :param bedrock_aws_profile: AWS profile for Bedrock access. Default is None.
+        :type bedrock_aws_profile: str
         """
-
-        # validate parameters
-        if not openai_api_key and not azure_api_key:
-            raise ValueError("Must supply either OpenAI or Azure parameters for LLM access.")
 
         # initialize LangSmith API (if key specified)
         if langsmith_api_key:
@@ -101,19 +108,38 @@ class LLMInterface:
         self.json_retries = json_retries
 
         # initialize LangChain LLM access
-        if azure_api_key:
-            self.llm = AzureChatOpenAI(openai_api_key=azure_api_key, temperature=temperature,
-                                       deployment_name=azure_api_engine, azure_endpoint=azure_api_base,
-                                       openai_api_version=azure_api_version, openai_api_type="azure")
-            # assume model is the engine name for Azure
-            self.model = azure_api_engine
-        else:
-            self.llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=temperature, model_name=openai_model)
+        if openai_api_key:
+            self.llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=temperature, model_name=openai_model,
+                                  model_kwargs={"response_format": {"type": "json_object"}})
             # assume model is the model name for OpenAI
             self.model = openai_model
-        self.json_llm = self.llm.with_structured_output(method="json_mode", include_raw=True)
+        elif azure_api_key:
+            self.llm = AzureChatOpenAI(openai_api_key=azure_api_key, temperature=temperature,
+                                       deployment_name=azure_api_engine, azure_endpoint=azure_api_base,
+                                       openai_api_version=azure_api_version, openai_api_type="azure",
+                                       model_kwargs={"response_format": {"type": "json_object"}})
+            # assume model is the engine name for Azure
+            self.model = azure_api_engine
+        elif bedrock_model:
+            if bedrock_aws_profile:
+                # if we have an AWS profile, use it to configure Bedrock
+                self.llm = ChatBedrock(credentials_profile_name=bedrock_aws_profile, model_id=bedrock_model,
+                                       region_name=bedrock_region, model_kwargs={"temperature": temperature})
+            else:
+                # otherwise, assume that credentials are in AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and
+                # AWS_SESSION_TOKEN environment variables
+                self.llm = ChatBedrock(model_id=bedrock_model, region_name=bedrock_region,
+                                       model_kwargs={"temperature": temperature})
+            # assume model is the model name for OpenAI
+            self.model = bedrock_model
+        elif anthropic_api_key:
+            self.llm = ChatAnthropic(api_key=anthropic_api_key, model=anthropic_model, temperature=temperature)
+            # assume model is the model name for Anthropic
+            self.model = anthropic_model
+        else:
+            raise ValueError("Must supply either OpenAI, Azure, Anthropic, or Bedrock parameters for LLM access.")
 
-    def llm_json_response(self, prompt: str | list, json_validation_schema: str = "") -> dict | None:
+    def llm_json_response(self, prompt: str | list, json_validation_schema: str = "") -> tuple[dict | None, str, str]:
         """
         Call out to LLM for structured JSON response.
 
@@ -124,16 +150,16 @@ class LLMInterface:
         :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "", which
           means no validation.
         :type json_validation_schema: str
-        :return: JSON response from the LLM (or None if no response).
-        :rtype: dict
+        :return: Tuple with parsed JSON response, raw LLM response, and error message (if any).
+        :rtype: tuple(dict | None, str, str)
         """
 
         # execute LLM evaluation, but catch and return any exceptions
         try:
-            result = self.json_llm.invoke(prompt)
-
-            # validate JSON response
-            validation_error = self._result_validation_error(result, json_validation_schema)
+            # invoke LLM and parse+validate JSON response
+            result = self.llm.invoke(prompt)
+            json_objects = self.extract_json(result.content)
+            validation_error = self._json_validation_error(json_objects, json_validation_schema)
 
             if validation_error and self.json_retries > 0:
                 # if there was a validation error, retry up to the allowed number of times
@@ -162,22 +188,24 @@ class LLMInterface:
                                                                  f"to the instructions given:"))
 
                     # retry
-                    result = self.json_llm.invoke(retry_prompt)
+                    result = self.llm.invoke(retry_prompt)
+                    json_objects = self.extract_json(result.content)
+                    validation_error = self._json_validation_error(json_objects, json_validation_schema)
                     retries += 1
 
                     # break if we got a valid response, otherwise keep going till we run out of retries
-                    validation_error = self._result_validation_error(result, json_validation_schema)
                     if not validation_error:
                         break
 
-            # if we're out of retries and still have a validation error, return that error
             if validation_error:
-                # if we still have a validation error, return the error the way LangChain might
-                result = {"raw": BaseMessage(type="ERROR", content=f"{validation_error}")}
+                # if we're out of retries and still have a validation error, we'll fall through to return it
+                pass
         except Exception as caught_e:
-            # format error the way LangChain might
-            result = {"raw": BaseMessage(type="ERROR", content=f"{caught_e}")}
-        return result
+            # catch and return the error with no response
+            return None, "", str(caught_e)
+
+        # return result
+        return json_objects[0] if not validation_error else None, result.content, validation_error
 
     def llm_json_response_with_timeout(self, prompt: str | list, json_validation_schema: str = "") -> dict | None:
         """
@@ -216,40 +244,6 @@ class LLMInterface:
             return result
 
         return _llm_json_response_with_timeout(prompt, json_validation_schema)
-
-    @staticmethod
-    def process_json_response(response: dict) -> tuple[str, dict]:
-        """
-        Process JSON response from LLM and return as raw response and parsed dictionary from JSON.
-
-        This function processes the JSON response received from the LLM, handling errors and parsing the response as
-        needed.
-
-        :param response: JSON response from LLM.
-        :type response: dict
-        :return: Raw response and parsed dictionary from JSON.
-        :rtype: tuple
-        """
-
-        parsed_response = None
-        if response['raw'].type == "ERROR":
-            # if we caught an error, report and save that error, then move on
-            final_response = response['raw'].content
-            logging.warning(f"Error from LLM: {final_response}")
-        elif 'parsed' in response and response['parsed'] is not None:
-            # if we got a parsed version, save the JSON version of that
-            final_response = json.dumps(response['parsed'])
-            parsed_response = response['parsed']
-        elif 'parsing_error' in response and response['parsing_error'] is not None:
-            # if there was a parsing error, report and save that error, then move on
-            final_response = str(response['parsing_error'])
-            logging.warning(f"JSON parsing error : {final_response}")
-        else:
-            final_response = ""
-            logging.warning(f"Unknown response from LLM")
-
-        # return response in both raw and parsed formats
-        return final_response, parsed_response
 
     def generate_json_schema(self, json_output_spec: str) -> str:
         """
@@ -445,21 +439,78 @@ The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
 }"""
 
         # call out to LLM to generate JSON schema
-        response, parsed_response = self.process_json_response(
-            self.llm_json_response_with_timeout(json_schema_prompt, json_schema_schema))
+        parsed_response, response, error = self.llm_json_response_with_timeout(json_schema_prompt, json_schema_schema)
 
-        # return JSON schema as string (or raise error if not generated)
-        if not parsed_response:
-            raise ValueError(f"Failed to generate JSON schema: {response}")
-        return response
+        # raise error if any
+        if error:
+            raise RuntimeError(f"Failed to generate JSON schema: {error}")
+
+        # return as nicely-formatted version of parsed response
+        return json.dumps(parsed_response, indent=2)
 
     @staticmethod
-    def _result_validation_error(llm_result: dict, json_validation_schema: str = "") -> str:
+    def extract_json(text: str) -> list[dict]:
         """
-        Validate JSON LLM result, return error text if invalid.
+        Extract JSON content from a string, handling various formats.
 
-        :param llm_result: LLM result to validate.
-        :type llm_result: dict
+        :param text: Text containing potential JSON content.
+        :type text: str
+        :return: A list of extracted JSON objects, or [] if none could be parsed or found.
+        :rtype: list[dict]
+        """
+
+        json_objects = []
+
+        # first try: parse the entire text as JSON
+        try:
+            parsed = json.loads(text.strip())
+            # if that worked, go ahead and return as a single JSON object
+            return [parsed]
+        except json.JSONDecodeError:
+            # otherwise, continue to try other methods
+            pass
+
+        # second try: look for code blocks with an explicit json specification
+        json_pattern = r"```json(.*?)```"
+        json_matches = re.findall(json_pattern, text, re.DOTALL)
+
+        if not json_matches:
+            # third try: look for generic code blocks if no json-specific blocks found
+            generic_pattern = r"```(.*?)```"
+            generic_matches = re.findall(generic_pattern, text, re.DOTALL)
+
+            for match in generic_matches:
+                # skip if the match starts with a language specification other than 'json'
+                if match.strip().split('\n')[0] in ['python', 'javascript', 'typescript', 'java', 'cpp', 'ruby']:
+                    continue
+
+                # otherwise, try to parse
+                try:
+                    parsed = json.loads(match.strip())
+                    # if we could parse it, add it to our results
+                    json_objects.append(parsed)
+                except json.JSONDecodeError:
+                    continue
+        else:
+            # process json-specific matches
+            for match in json_matches:
+                try:
+                    parsed = json.loads(match.strip())
+                    # if we could parse it, add it to our results
+                    json_objects.append(parsed)
+                except json.JSONDecodeError:
+                    continue
+
+        # return result, which could be an empty list if we didn't manage to find and parse anything
+        return json_objects
+
+    @staticmethod
+    def _json_validation_error(json_objects: list[dict], json_validation_schema: str = "") -> str:
+        """
+        Validate LLM-returned JSON, return error text if invalid.
+
+        :param json_objects: JSON objects returned from the LLM.
+        :type json_objects: list[dict]
         :param json_validation_schema: JSON schema for validating the JSON response (defaults to "" for no schema
           validation).
         :type json_validation_schema: str
@@ -468,14 +519,15 @@ The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
         """
 
         # check for parsing errors
-        if 'parsing_error' in llm_result and llm_result['parsing_error'] is not None:
-            return f"JSON parsing error : {str(llm_result['parsing_error'])}"
-        elif 'parsed' not in llm_result or llm_result['parsed'] is None:
-            return f"JSON parsing error: no parsed JSON found"
+        if not json_objects:
+            return "JSON parsing error: no valid JSON found in response"
+        elif len(json_objects) > 1:
+            return f"JSON parsing error: {len(json_objects)} JSON objects found in response"
         elif json_validation_schema:
             # validate parsed JSON against schema
+            parsed_json = json_objects[0]
             try:
-                validate(instance=llm_result['parsed'], schema=json.loads(json_validation_schema))
+                validate(instance=parsed_json, schema=json.loads(json_validation_schema))
             except json.JSONDecodeError as e:
                 return f"Failed to parse JSON schema: {e}"
             except SchemaError as e:

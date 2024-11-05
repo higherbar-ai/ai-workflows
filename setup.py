@@ -19,7 +19,7 @@ with open('README.rst') as file:
 
 setup(
     name='py-ai-workflows',
-    version='0.8.0',
+    version='0.9.0',
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
     python_requires='>=3.10',
@@ -28,6 +28,8 @@ setup(
         'langchain>=0.2.0,<0.3',
         'langchain-openai==0.1.19',
         'langchain-community>=0.2.0,<0.3',
+        'langchain-anthropic>=0.1.0,<0.2',
+        'langchain-aws>=0.1.0,<0.2',
         'langsmith>=0.1.63,<0.2',
         'tiktoken>=0.7.0,<1.0.0',
         'openai==1.37.1',
