@@ -11,6 +11,7 @@ pymupdf4llm
 Pillow
 openpyxl
 nltk==3.9.1
+jsonschema
 # dev environment
 setuptools~=70.0.0
 twine>=5.0,<6.0

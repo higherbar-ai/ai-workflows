@@ -23,6 +23,7 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_t
 import json
 import os
 import logging
+from jsonschema import validate, ValidationError, SchemaError
 
 
 class LLMInterface:
@@ -112,7 +113,7 @@ class LLMInterface:
             self.model = openai_model
         self.json_llm = self.llm.with_structured_output(method="json_mode", include_raw=True)
 
-    def llm_json_response(self, prompt: str | list) -> dict | None:
+    def llm_json_response(self, prompt: str | list, json_validation_schema: str = "") -> dict | None:
         """
         Call out to LLM for structured JSON response.
 
@@ -120,6 +121,9 @@ class LLMInterface:
 
         :param prompt: Prompt to send to the LLM.
         :type prompt: str | list
+        :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "", which
+          means no validation.
+        :type json_validation_schema: str
         :return: JSON response from the LLM (or None if no response).
         :rtype: dict
         """
@@ -128,8 +132,11 @@ class LLMInterface:
         try:
             result = self.json_llm.invoke(prompt)
 
-            if 'parsing_error' in result and result['parsing_error'] is not None and self.json_retries > 0:
-                # if there was a parsing error, retry up to the allowed number of times
+            # validate JSON response
+            validation_error = self._result_validation_error(result, json_validation_schema)
+
+            if validation_error and self.json_retries > 0:
+                # if there was a validation error, retry up to the allowed number of times
                 retries = 0
                 while retries < self.json_retries:
                     if isinstance(prompt, str):
@@ -140,25 +147,39 @@ class LLMInterface:
                         retry_prompt = prompt.copy()
                     # add original response
                     retry_prompt.append(AIMessage(content=result['raw'].content))
-                    # add retry prompt
-                    retry_prompt.append(HumanMessage(content=f"Your JSON response was invalid. Please correct it "
-                                                             f"and respond with valid JSON (with no code block "
-                                                             f"or other content). Just 100% valid JSON, according "
-                                                             f"to the instructions given:"))
+                    # add retry prompt, with or without a schema to guide the retry
+                    if json_validation_schema:
+                        retry_prompt.append(HumanMessage(content=f"Your JSON response was invalid. Please correct it "
+                                                                 f"and respond with valid JSON (with no code block "
+                                                                 f"or other content). Just 100% valid JSON, according "
+                                                                 f"to the instructions given. Your JSON response "
+                                                                 f"should match the following schema:\n\n"
+                                                                 f"{json_validation_schema}\n\nYour JSON response:"))
+                    else:
+                        retry_prompt.append(HumanMessage(content=f"Your JSON response was invalid. Please correct it "
+                                                                 f"and respond with valid JSON (with no code block "
+                                                                 f"or other content). Just 100% valid JSON, according "
+                                                                 f"to the instructions given:"))
 
                     # retry
                     result = self.json_llm.invoke(retry_prompt)
                     retries += 1
 
                     # break if we got a valid response, otherwise keep going till we run out of retries
-                    if 'parsing_error' not in result or result['parsing_error'] is None:
+                    validation_error = self._result_validation_error(result, json_validation_schema)
+                    if not validation_error:
                         break
+
+            # if we're out of retries and still have a validation error, return that error
+            if validation_error:
+                # if we still have a validation error, return the error the way LangChain might
+                result = {"raw": BaseMessage(type="ERROR", content=f"{validation_error}")}
         except Exception as caught_e:
-            # format error result like success result
+            # format error the way LangChain might
             result = {"raw": BaseMessage(type="ERROR", content=f"{caught_e}")}
         return result
 
-    def llm_json_response_with_timeout(self, prompt: str | list) -> dict | None:
+    def llm_json_response_with_timeout(self, prompt: str | list, json_validation_schema: str = "") -> dict | None:
         """
         Call out to LLM for structured JSON response with timeout and retry.
 
@@ -167,6 +188,9 @@ class LLMInterface:
 
         :param prompt: Prompt to send to the LLM.
         :type prompt: str | list
+        :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "", which
+          means no validation.
+        :type json_validation_schema: str
         :return: JSON response from the LLM (or None if no response).
         :rtype: dict
         """
@@ -180,18 +204,18 @@ class LLMInterface:
         )
 
         @retry_decorator
-        def _llm_json_response_with_timeout(inner_prompt: str | list) -> dict | None:
+        def _llm_json_response_with_timeout(inner_prompt: str | list, validation_schema: str = "") -> dict | None:
             try:
                 # run async request on separate thread, wait for result with timeout and automatic retry
                 with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(self.llm_json_response, inner_prompt)
+                    future = executor.submit(self.llm_json_response, inner_prompt, validation_schema)
                     result = future.result(timeout=self.total_response_timeout_seconds)
             except Exception as caught_e:
                 # format error result like success result
                 result = {"raw": BaseMessage(type="ERROR", content=f"{caught_e}")}
             return result
 
-        return _llm_json_response_with_timeout(prompt)
+        return _llm_json_response_with_timeout(prompt, json_validation_schema)
 
     @staticmethod
     def process_json_response(response: dict) -> tuple[str, dict]:
@@ -219,10 +243,245 @@ class LLMInterface:
         elif 'parsing_error' in response and response['parsing_error'] is not None:
             # if there was a parsing error, report and save that error, then move on
             final_response = str(response['parsing_error'])
-            logging.warning(f"Parsing error : {final_response}")
+            logging.warning(f"JSON parsing error : {final_response}")
         else:
             final_response = ""
             logging.warning(f"Unknown response from LLM")
 
         # return response in both raw and parsed formats
         return final_response, parsed_response
+
+    def generate_json_schema(self, json_output_spec: str) -> str:
+        """
+        Generate a JSON schema, adequate for JSON validation, based on a human-language JSON output specification.
+
+        :param json_output_spec: Human-language JSON output specification.
+        :type json_output_spec: str
+        :return: JSON schema suitable for JSON validation purposes.
+        :rtype: str
+        """
+
+        # create a prompt for the LLM to generate a JSON schema
+        json_schema_prompt = f"""Please generate a JSON schema based on the following description. Ensure that the schema is valid according to JSON Schema Draft 7 and includes appropriate types, properties, and required fields. Output only the JSON Schema with no description, code blocks, or other content.
+
+The description, within |@| delimiters:
+
+|@|{json_output_spec}|@|
+
+The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
+
+        # set a meta-schema for validating returned JSON schema (from https://json-schema.org/draft-07/schema)
+        json_schema_schema = """{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "http://json-schema.org/draft-07/schema#",
+    "title": "Core schema meta-schema",
+    "definitions": {
+        "schemaArray": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#" }
+        },
+        "nonNegativeInteger": {
+            "type": "integer",
+            "minimum": 0
+        },
+        "nonNegativeIntegerDefault0": {
+            "allOf": [
+                { "$ref": "#/definitions/nonNegativeInteger" },
+                { "default": 0 }
+            ]
+        },
+        "simpleTypes": {
+            "enum": [
+                "array",
+                "boolean",
+                "integer",
+                "null",
+                "number",
+                "object",
+                "string"
+            ]
+        },
+        "stringArray": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true,
+            "default": []
+        }
+    },
+    "type": ["object", "boolean"],
+    "properties": {
+        "$id": {
+            "type": "string",
+            "format": "uri-reference"
+        },
+        "$schema": {
+            "type": "string",
+            "format": "uri"
+        },
+        "$ref": {
+            "type": "string",
+            "format": "uri-reference"
+        },
+        "$comment": {
+            "type": "string"
+        },
+        "title": {
+            "type": "string"
+        },
+        "description": {
+            "type": "string"
+        },
+        "default": true,
+        "readOnly": {
+            "type": "boolean",
+            "default": false
+        },
+        "writeOnly": {
+            "type": "boolean",
+            "default": false
+        },
+        "examples": {
+            "type": "array",
+            "items": true
+        },
+        "multipleOf": {
+            "type": "number",
+            "exclusiveMinimum": 0
+        },
+        "maximum": {
+            "type": "number"
+        },
+        "exclusiveMaximum": {
+            "type": "number"
+        },
+        "minimum": {
+            "type": "number"
+        },
+        "exclusiveMinimum": {
+            "type": "number"
+        },
+        "maxLength": { "$ref": "#/definitions/nonNegativeInteger" },
+        "minLength": { "$ref": "#/definitions/nonNegativeIntegerDefault0" },
+        "pattern": {
+            "type": "string",
+            "format": "regex"
+        },
+        "additionalItems": { "$ref": "#" },
+        "items": {
+            "anyOf": [
+                { "$ref": "#" },
+                { "$ref": "#/definitions/schemaArray" }
+            ],
+            "default": true
+        },
+        "maxItems": { "$ref": "#/definitions/nonNegativeInteger" },
+        "minItems": { "$ref": "#/definitions/nonNegativeIntegerDefault0" },
+        "uniqueItems": {
+            "type": "boolean",
+            "default": false
+        },
+        "contains": { "$ref": "#" },
+        "maxProperties": { "$ref": "#/definitions/nonNegativeInteger" },
+        "minProperties": { "$ref": "#/definitions/nonNegativeIntegerDefault0" },
+        "required": { "$ref": "#/definitions/stringArray" },
+        "additionalProperties": { "$ref": "#" },
+        "definitions": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#" },
+            "default": {}
+        },
+        "properties": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#" },
+            "default": {}
+        },
+        "patternProperties": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#" },
+            "propertyNames": { "format": "regex" },
+            "default": {}
+        },
+        "dependencies": {
+            "type": "object",
+            "additionalProperties": {
+                "anyOf": [
+                    { "$ref": "#" },
+                    { "$ref": "#/definitions/stringArray" }
+                ]
+            }
+        },
+        "propertyNames": { "$ref": "#" },
+        "const": true,
+        "enum": {
+            "type": "array",
+            "items": true,
+            "minItems": 1,
+            "uniqueItems": true
+        },
+        "type": {
+            "anyOf": [
+                { "$ref": "#/definitions/simpleTypes" },
+                {
+                    "type": "array",
+                    "items": { "$ref": "#/definitions/simpleTypes" },
+                    "minItems": 1,
+                    "uniqueItems": true
+                }
+            ]
+        },
+        "format": { "type": "string" },
+        "contentMediaType": { "type": "string" },
+        "contentEncoding": { "type": "string" },
+        "if": { "$ref": "#" },
+        "then": { "$ref": "#" },
+        "else": { "$ref": "#" },
+        "allOf": { "$ref": "#/definitions/schemaArray" },
+        "anyOf": { "$ref": "#/definitions/schemaArray" },
+        "oneOf": { "$ref": "#/definitions/schemaArray" },
+        "not": { "$ref": "#" }
+    },
+    "default": true
+}"""
+
+        # call out to LLM to generate JSON schema
+        response, parsed_response = self.process_json_response(
+            self.llm_json_response_with_timeout(json_schema_prompt, json_schema_schema))
+
+        # return JSON schema as string (or raise error if not generated)
+        if not parsed_response:
+            raise ValueError(f"Failed to generate JSON schema: {response}")
+        return response
+
+    @staticmethod
+    def _result_validation_error(llm_result: dict, json_validation_schema: str = "") -> str:
+        """
+        Validate JSON LLM result, return error text if invalid.
+
+        :param llm_result: LLM result to validate.
+        :type llm_result: dict
+        :param json_validation_schema: JSON schema for validating the JSON response (defaults to "" for no schema
+          validation).
+        :type json_validation_schema: str
+        :return: "" if parsed JSON is valid, otherwise text of the validation error.
+        :rtype: str
+        """
+
+        # check for parsing errors
+        if 'parsing_error' in llm_result and llm_result['parsing_error'] is not None:
+            return f"JSON parsing error : {str(llm_result['parsing_error'])}"
+        elif 'parsed' not in llm_result or llm_result['parsed'] is None:
+            return f"JSON parsing error: no parsed JSON found"
+        elif json_validation_schema:
+            # validate parsed JSON against schema
+            try:
+                validate(instance=llm_result['parsed'], schema=json.loads(json_validation_schema))
+            except json.JSONDecodeError as e:
+                return f"Failed to parse JSON schema: {e}"
+            except SchemaError as e:
+                return f"JSON schema is invalid: {e}"
+            except ValidationError as e:
+                return f"JSON response is invalid: {e}"
+
+        # if we made it this far, that means the JSON is valid
+        return ""
