@@ -42,6 +42,7 @@ import re
 import tempfile
 import logging
 import tiktoken
+import hashlib
 
 
 class DocumentInterface:
@@ -88,7 +89,7 @@ class DocumentInterface:
         return self._convert(filepath, to_format="md")
 
     def convert_to_json(self, filepath: str, json_context: str, json_job: str, json_output_spec: str,
-                        markdown_first: Optional[bool] = None) -> list[dict]:
+                        markdown_first: Optional[bool] = None, json_output_schema: str | None = "") -> list[dict]:
         """
         Convert a document to JSON.
 
@@ -111,6 +112,9 @@ class DocumentInterface:
           won't work if the file Markdown is too large to fit in the LLM context window. The default is None, which will
           use the Markdown path for smaller PDF files and the page-by-page path for larger ones.
         :type markdown_first: Optional[bool]
+        :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
+          schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
+        :type json_output_schema: str
         :return: List of dicts from page-level JSON results.
         :rtype: list[dict]
         """
@@ -153,10 +157,11 @@ class DocumentInterface:
 
         # use internal conversion function
         return self._convert(filepath, to_format="json" if not markdown_first else "mdjson",
-                             json_context=json_context, json_job=json_job, json_output_spec=json_output_spec)
+                             json_context=json_context, json_job=json_job, json_output_spec=json_output_spec,
+                             json_output_schema=json_output_schema)
 
     def _convert(self, filepath: str, to_format: str = "md", json_context: str = "", json_job: str = "",
-                 json_output_spec: str = "") -> str | list[dict]:
+                 json_output_spec: str = "", json_output_schema: str | None = "") -> str | list[dict]:
         """
         Convert a document to Markdown or JSON.
 
@@ -179,6 +184,9 @@ class DocumentInterface:
           JSON with a single key named `questions` that is a list of dicts, one for each question or form field, each
           with the keys listed below..."). (Required for JSON output.)
         :type json_output_spec: str
+        :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
+          schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
+        :type json_output_schema: str
         :return: Markdown output or list of dicts containing JSON results.
         :rtype: str | list[dict]
         """
@@ -206,11 +214,12 @@ class DocumentInterface:
                     return pdf_converter.pdf_to_markdown(filepath)
                 elif to_format == "json":
                     # convert directly to JSON
-                    return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec)
+                    return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec,
+                                                     json_output_schema)
                 else:
                     # convert to Markdown and then to JSON
                     markdown = pdf_converter.pdf_to_markdown(filepath)
-                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
+                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
 
             # convert certain other file types to PDF to then convert with the LLM
             if ext in DocumentInterface.via_pdf_file_extensions:
@@ -224,11 +233,13 @@ class DocumentInterface:
                         return pdf_converter.pdf_to_markdown(pdf_path)
                     elif to_format == "json":
                         # convert directly to JSON
-                        return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec)
+                        return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec,
+                                                         json_output_schema)
                     else:
                         # convert to Markdown and then to JSON
                         markdown = pdf_converter.pdf_to_markdown(pdf_path)
-                        return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
+                        return self.markdown_to_json(markdown, json_context, json_job, json_output_spec,
+                                                     json_output_schema)
 
         # if Excel, see if we can convert to Markdown using our custom converter
         if ext == '.xlsx':
@@ -239,7 +250,7 @@ class DocumentInterface:
             if result:
                 if to_format == "json":
                     # if we're after JSON, convert the Markdown to JSON using the LLM
-                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
+                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
                 else:
                     # otherwise, just return the Markdown
                     return markdown
@@ -283,7 +294,7 @@ class DocumentInterface:
 
         if to_format in ["json", "mdjson"]:
             # if we're after JSON, convert the Markdown to JSON using the LLM
-            return self.markdown_to_json(markdown, json_context, json_job, json_output_spec)
+            return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
         else:
             # otherwise, just return the Markdown
             return markdown
@@ -316,7 +327,8 @@ class DocumentInterface:
         # return path to the converted PDF file
         return os.path.join(output_dir, os.path.splitext(os.path.basename(filepath))[0] + '.pdf')
 
-    def markdown_to_json(self, markdown: str, json_context: str, json_job: str, json_output_spec: str) -> list[dict]:
+    def markdown_to_json(self, markdown: str, json_context: str, json_job: str, json_output_spec: str,
+                         json_output_schema: str | None = "") -> list[dict]:
         """
         Convert Markdown text to JSON using an LLM.
 
@@ -332,6 +344,9 @@ class DocumentInterface:
           single key named `questions` that is a list of dicts, one for each question or form field, each with the keys
           listed below...").
         :type json_output_spec: str
+        :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
+          schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
+        :type json_output_schema: str
         :return: List of dicts with JSON results (could be all results in one dict, could be split into multiple because
           of page-by-page or other batched processing).
         :rtype: list[dict]
@@ -356,10 +371,24 @@ Markdown text enclosed by |@| delimiters:
 
 Your JSON response precisely following the instructions given above the Markdown text:"""
 
+        # handle automatic schema generation, with cache
+        if json_output_schema is None:
+            # explicitly skip schema validation
+            json_output_schema = ""
+        elif not json_output_schema:
+            # use cached schema if available
+            json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
+
+            # if no cached version available, generate and cache it now
+            if not json_output_schema:
+                json_output_schema = self.llm_interface.generate_json_schema(json_output_spec)
+                JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
+
         # for now, process all in one go (assumes it all fits in the LLM context window)
         response_text, response_dict = self.llm_interface.process_json_response(
             self.llm_interface.llm_json_response_with_timeout(
-                [HumanMessage(content=[{"type": "text", "text": json_prompt}])]))
+                prompt=[HumanMessage(content=[{"type": "text", "text": json_prompt}])],
+                json_validation_schema=json_output_schema))
 
         # raise exception if we didn't get a response
         if response_dict is None:
@@ -584,7 +613,8 @@ class PDFDocumentConverter:
         # return assembled markdown output with extra newlines at the end stripped out
         return markdown_output.strip()
 
-    def pdf_to_json(self, pdf_path: str, json_context: str, json_job: str, json_output_spec: str) -> list[dict]:
+    def pdf_to_json(self, pdf_path: str, json_context: str, json_job: str, json_output_spec: str,
+                    json_output_schema: str | None = "") -> list[dict]:
         """
         Process a PDF file page-by-page to extract elements and output JSON text.
 
@@ -602,6 +632,9 @@ class PDFDocumentConverter:
           single key named `questions` that is a list of dicts, one for each question or form field, each with the keys
           listed below...").
         :type json_output_spec: str
+        :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
+          schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
+        :type json_output_schema: str
         :return: List of parsed results from all pages, one per page, in order.
         :rtype: list[dict]
         """
@@ -624,6 +657,19 @@ class PDFDocumentConverter:
 
 Your JSON response precisely following the instructions above:"""
 
+        # handle automatic schema generation, with cache
+        if json_output_schema is None:
+            # explicitly skip schema validation
+            json_output_schema = ""
+        elif not json_output_schema:
+            # use cached schema if available
+            json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
+
+            # if no cached version available, generate and cache it now
+            if not json_output_schema:
+                json_output_schema = self.llm_interface.generate_json_schema(json_output_spec)
+                JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
+
         # process each page
         all_dicts = []
         logging.log(logging.INFO, f"Processing PDF {pdf_path} from {len(images)} images")
@@ -634,11 +680,11 @@ Your JSON response precisely following the instructions above:"""
             encoded_image = base64.b64encode(PDFDocumentConverter._get_image_bytes(img)).decode('utf-8')
             # call out to the LLM and process the returned JSON
             response_text, response_dict = self.llm_interface.process_json_response(
-                self.llm_interface.llm_json_response_with_timeout([
+                self.llm_interface.llm_json_response_with_timeout(prompt=[
                     HumanMessage(content=[
                         {"type": "text", "text": image_prompt},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"}},
-                    ])]))
+                    ])], json_validation_schema=json_output_schema))
 
             # assemble results
             if response_dict is not None:
@@ -728,8 +774,44 @@ Then, respond in correctly-formatted JSON according to the format described belo
 
 Be sure to follow these JSON instructions faithfully, returning a single `elements` object list (each with `type` and `content` keys)."""
 
+        json_output_schema = """{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "elements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "body_text_section",
+              "boxout",
+              "table",
+              "chart",
+              "image",
+              "footnote",
+              "page_header",
+              "page_footer",
+              "other"
+            ]
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": ["type", "content"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["elements"],
+  "additionalProperties": false
+}"""
+
         # process PDF to JSON
-        all_dicts = self.pdf_to_json(pdf_path, json_context, json_job, json_output_spec)
+        all_dicts = self.pdf_to_json(pdf_path, json_context, json_job, json_output_spec, json_output_schema)
 
         # aggregate all elements into a single list
         all_elements = []
@@ -1790,3 +1872,50 @@ class UnstructuredDocumentConverter:
 
         # return combined markdown content
         return "\n".join(markdown_parts)
+
+
+class JSONSchemaCache:
+    """Cache for JSON schemas."""
+
+    # shared class-level member for schema cache
+    schema_cache: Dict[str, str] = {}
+
+    @staticmethod
+    def get_json_schema(json_description: str) -> str:
+        """
+        Retrieve cached schema from JSON description.
+
+        :param json_description: Description of the JSON format.
+        :type json_description: str
+        :return: JSON schema or empty string if not found.
+        :rtype: str
+        """
+
+        return JSONSchemaCache.schema_cache.get(JSONSchemaCache._get_description_hash(json_description), "")
+
+    @staticmethod
+    def put_json_schema(json_description: str, json_schema: str):
+        """
+        Cache a JSON schema.
+
+        :param json_description: Description of the JSON format.
+        :type json_description: str
+        :param json_schema: JSON schema to cache.
+        :type json_schema: str
+        """
+
+        JSONSchemaCache.schema_cache[JSONSchemaCache._get_description_hash(json_description)] = json_schema
+
+    @staticmethod
+    def _get_description_hash(description: str) -> str:
+        """
+        Get a hash of the description for use as a cache key.
+
+        :param description: Description to hash.
+        :type description: str
+        :return: Hashed description.
+        :rtype: str
+        """
+
+        normalized_description = ' '.join(description.split()).lower()
+        return hashlib.sha256(normalized_description.encode('utf-8')).hexdigest()

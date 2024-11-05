@@ -2,8 +2,9 @@
 ai_workflows
 ============
 
-The ``ai_workflows`` package is a toolkit for AI workflows (i.e., workflows that are pre-scripted and repeatable, but utilize
-LLMs for various tasks). It's still in early development, but is ready to support piloting and experimentation.
+The ``ai_workflows`` package is a toolkit for supporting AI workflows (i.e., workflows that are pre-scripted and
+repeatable, but utilize LLMs for various tasks). It's still in early development, but is ready to support piloting and
+experimentation.
 
 Installation
 ------------
@@ -85,9 +86,16 @@ Technical notes
 LLMInterface
 ^^^^^^^^^^^^
 
-Currently, the ``LLMInterface`` class only works with OpenAI models, either directly from OpenAI or via Azure.
+When you use the ``LLMInterface`` class to interact with an LLM, you can provide a formal JSON schema to validate JSON
+responses. If you only have a human-readable description of the JSON output format, you can convert that to a JSON
+schema by calling ``LLMInterface.generate_json_schema()``. This method will convert a human-readable description into a
+formal schema that can be used to validate JSON responses. (The ``DocumentInterface`` class will handle this
+automatically when used to convert documents to JSON. See below for more details.)
 
-Claude support (directly or via AWS Bedrock) is next up on the roadmap, followed by other models as requested.
+By default, the ``LLMInterface`` class will retry twice if an LLM response doesn't parse as JSON or match the schema
+provided (if any), but you can change this behavior by specifying the ``json_retries`` parameter in the constructor.
+
+Currently, the ``LLMInterface`` class only works with OpenAI models, either directly from OpenAI or via Azure. Claude support (directly or via AWS Bedrock) is next up on the roadmap, followed by other models as requested.
 
 Markdown conversion
 ^^^^^^^^^^^^^^^^^^^
@@ -139,6 +147,11 @@ are:
 #. ``json_context``: a description of the file's content, to help the LLM understand what it's looking at
 #. ``json_job``: a description of the task you want the LLM to perform (e.g., extracting survey questions)
 #. ``json_output_spec``: a description of the output you expect from the LLM
+#. ``json_output_schema``: optionally, a formal JSON schema to validate the LLM's output; by
+   default, this will be automatically generated based on your ``json_output_spec``, but you can specify your own
+   schema or explicitly pass None if you want to disable JSON validation (if JSON validation isn't disabled, the
+   ``LLMInterface`` default is to retry twice if the LLM output doesn't parse or match the schema, but you can change
+   this behavior by specifying the ``json_retries`` parameter in the ``LLMInterface`` constructor)
 
 The more detail you provide, the better the LLM will do at the JSON conversion.
 
