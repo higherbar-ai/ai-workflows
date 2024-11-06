@@ -162,6 +162,9 @@ Known issues
 
 #. The example Google Colab notebooks pop up a message during installation that offers to restart the runtime. You have
    to click cancel so as not to interrupt execution.
+#. OpenAI can randomly refuse some requests to process PDF pages and currently there's no auto-retry, so it can
+   interrupt PDF processing at inconvenient times. Azure's OpenAI implementation seems to be more robust, particularly
+   if you relax the content filtering.
 #. LangSmith tracing support is not as good for Anthropic as it is for OpenAI. Specifically: attached images don't show
    in traces and, while token usage does appear in the metadata, the UI doesn't show token usage nicely.
 
@@ -173,6 +176,7 @@ There's much that can be improved here. For example:
 * Unit testing
 * Tracking and reporting LLM costs
 * Improving evaluation and comparison methods
+* Adding automatic retries for LLM refusals
 * Parallelizing LLM calls for faster processing
 * Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
 * Adding OCR support for PDF files when an LLM isn't available
