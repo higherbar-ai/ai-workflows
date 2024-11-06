@@ -48,8 +48,7 @@ import hashlib
 class DocumentInterface:
     """Utility class for reading and processing documents for AI workflows."""
 
-    # class-level member variables
-    llm_interface: LLMInterface = None
+    # member variables
     via_pdf_file_extensions = [".docx", ".doc", ".pptx"]
     pymupdf_file_extensions = [".pdf", ".xps", ".epub", ".mobi", ".fb2", ".cbz", ".svg", ".txt"]
     libreoffice_file_extensions = [
@@ -62,18 +61,32 @@ class DocumentInterface:
     max_json_via_markdown_pages = 50
     max_json_via_markdown_tokens = 25000
 
-    def __init__(self, llm_interface: LLMInterface = None):
+    llm_interface: LLMInterface = None
+    pdf_image_dpi: int = 150
+    pdf_image_max_bytes = 1024 * 1024 * 4  # 4MB
+
+    def __init__(self, llm_interface: LLMInterface = None, pdf_image_dpi: int = 150,
+                 pdf_image_max_bytes: int = 1024 * 1024 * 4):
         """
         Initialize the document interface for reading and processing documents.
 
         :param llm_interface: LLM interface for interacting with LLMs in AI workflows (defaults to None, which won't
             use an LLM to convert supported document types to markdown).
         :type llm_interface: LLMInterface
+        :param pdf_image_dpi: DPI to use for rendering PDF images. Default is 150, which is generally plenty for LLM
+            applications.
+        :type pdf_image_dpi: int
+        :param pdf_image_max_bytes: Maximum size in bytes for an image to be processed. Default is 4MB.
+        :type pdf_image_max_bytes: int
         """
 
         # if specified, remember our LLM interface
         if llm_interface:
             self.llm_interface = llm_interface
+
+        # remember image settings
+        self.pdf_image_dpi = pdf_image_dpi
+        self.pdf_image_max_bytes = pdf_image_max_bytes
 
     def convert_to_markdown(self, filepath: str) -> str:
         """
@@ -208,7 +221,8 @@ class DocumentInterface:
             # always convert PDFs with the LLM
             if ext == '.pdf':
                 # convert PDF using LLM
-                pdf_converter = PDFDocumentConverter(self.llm_interface)
+                pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface, pdf_image_dpi=self.pdf_image_dpi,
+                                                     pdf_image_max_bytes=self.pdf_image_max_bytes)
                 if to_format == "md":
                     # convert to Markdown
                     return pdf_converter.pdf_to_markdown(filepath)
@@ -227,7 +241,9 @@ class DocumentInterface:
                     # convert to PDF in temporary directory
                     pdf_path = self.convert_to_pdf(filepath, temp_dir)
                     # convert PDF using LLM
-                    pdf_converter = PDFDocumentConverter(self.llm_interface)
+                    pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
+                                                         pdf_image_dpi=self.pdf_image_dpi,
+                                                         pdf_image_max_bytes=self.pdf_image_max_bytes)
                     if to_format == "md":
                         # convert to Markdown
                         return pdf_converter.pdf_to_markdown(pdf_path)
@@ -269,7 +285,9 @@ class DocumentInterface:
                         doc = fitz.open(pdf_path)
                         if len(doc) <= DocumentInterface.max_xlsx_via_pdf_pages:
                             # convert PDF to Markdown using LLM
-                            pdf_converter = PDFDocumentConverter(self.llm_interface)
+                            pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
+                                                                 pdf_image_dpi=self.pdf_image_dpi,
+                                                                 pdf_image_max_bytes=self.pdf_image_max_bytes)
                             return pdf_converter.pdf_to_markdown(pdf_path)
                         else:
                             logging.info(f"{filepath} converted to {len(doc)} pages, which is over the limit "
@@ -404,24 +422,36 @@ Your JSON response precisely following the instructions given above the Markdown
 class PDFDocumentConverter:
     """Utility class for converting PDF files to Markdown."""
 
-    # class-level member variables
+    # member variables
     llm_interface: LLMInterface = None
+    pdf_image_dpi: int = 150
+    pdf_image_max_bytes = 1024 * 1024 * 4  # 4MB
 
-    def __init__(self, llm_interface: LLMInterface = None):
+    def __init__(self, llm_interface: LLMInterface = None, pdf_image_dpi: int = 150,
+                 pdf_image_max_bytes: int = 1024 * 1024 * 4):
         """
         Initialize for converting PDF files.
 
         :param llm_interface: LLM interface for interacting with LLMs in AI workflows (defaults to None, which won't
             use an LLM to convert PDF files to Markdown).
         :type llm_interface: LLMInterface
+        :param pdf_image_dpi: DPI to use for rendering PDF images. Default is 150, which is generally plenty for LLM
+            applications.
+        :type pdf_image_dpi: int
+        :param pdf_image_max_bytes: Maximum size in bytes for an image to be processed. Default is 4MB.
+        :type pdf_image_max_bytes: int
         """
 
         # if specified, remember our LLM interface
         if llm_interface:
             self.llm_interface = llm_interface
 
+        # remember image settings
+        self.pdf_image_dpi = pdf_image_dpi
+        self.pdf_image_max_bytes = pdf_image_max_bytes
+
     @staticmethod
-    def pdf_to_images(pdf_path: str, dpi: int = 300) -> list[Image.Image]:
+    def pdf_to_images(pdf_path: str, dpi: int = 150) -> list[Image.Image]:
         """
         Convert a PDF to a list of PIL Images.
 
@@ -430,7 +460,7 @@ class PDFDocumentConverter:
 
         :param pdf_path: Path to the PDF file.
         :type pdf_path: str
-        :param dpi: DPI to use for rendering the PDF. Default is 300.
+        :param dpi: DPI to use for rendering the PDF. Default is 150, which is generally plenty for LLM applications.
         :type dpi: int
         :return: List of PIL Images representing the pages within the PDF.
         :rtype: list[Image.Image]
@@ -487,8 +517,8 @@ class PDFDocumentConverter:
         doc.close()
         return images
 
-    @staticmethod
-    def _get_image_bytes(image: Image.Image, output_format: str = 'PNG') -> bytes:
+    def get_image_bytes(self, image: Image.Image, output_format: str = 'PNG', max_bytes: int | None = None,
+                        current_dpi: int | None = None) -> bytes:
         """
         Convert a PIL Image to bytes in the specified format.
 
@@ -498,13 +528,45 @@ class PDFDocumentConverter:
         :type image: Image.Image
         :param output_format: Output format for the image (default is 'PNG').
         :type output_format: str
+        :param max_bytes: Maximum size in bytes for the image. If the image is larger than this, it will be resized to
+            fit within the limit. Default is None, which means no limit.
+        :type max_bytes: int | None
+        :param current_dpi: DPI of the image. If the image is resized, this will be used to calculate the new DPI.
+            Default is None, which means the DPI will be assumed to be the default PDF DPI set at the class level.
+        :type current_dpi: int | None
         :return: Bytes representing the image in the specified format.
         :rtype: bytes
         """
 
-        img_byte_arr = io.BytesIO()
-        image.save(img_byte_arr, format=output_format)
-        return img_byte_arr.getvalue()
+        # start with our current DPI
+        if current_dpi is None:
+            dpi = self.pdf_image_dpi
+        else:
+            dpi = current_dpi
+        while True:
+            # save the image with current DPI
+            img_byte_arr = io.BytesIO()
+            image.save(
+                img_byte_arr,
+                format=output_format,
+                optimize=True,
+                dpi=(dpi, dpi)
+            )
+            current_bytes = img_byte_arr.getvalue()
+
+            # if no max_bytes specified or size is under limit, return the bytes
+            if max_bytes is None or len(current_bytes) <= max_bytes:
+                return current_bytes
+
+            # if image is too large, reduce DPI by 10%
+            dpi = int(dpi * 0.9)
+
+            # if DPI gets too low, raise an error
+            if dpi < 50:  # 72 DPI is typically considered the minimum for screen display, so 50 would be quite low
+                raise RuntimeError(
+                    f"Unable to reduce image to meet size limit of {max_bytes} bytes. "
+                    f"Current size: {len(current_bytes)} bytes"
+                )
 
     @staticmethod
     def _starts_with_heading(content: str) -> bool:
@@ -643,7 +705,7 @@ class PDFDocumentConverter:
             raise ValueError("LLM interface required for PDF to JSON conversion")
 
         # convert PDF to images
-        images = PDFDocumentConverter.pdf_to_images(pdf_path)
+        images = PDFDocumentConverter.pdf_to_images(pdf_path=pdf_path, dpi=self.pdf_image_dpi)
 
         # set up for image processing
         image_prompt = f"""Consider the attached image, which shows a single page (or, sometimes, two facing pages) from a PDF file.
@@ -675,8 +737,10 @@ Your JSON response precisely following the instructions above:"""
         for i, img in enumerate(images):
             logging.log(logging.INFO, f"Processing PDF page {i + 1}: Size={img.size}, Mode={img.mode}")
 
-            # encode image contents for OpenAI
-            encoded_image = base64.b64encode(PDFDocumentConverter._get_image_bytes(img)).decode('utf-8')
+            # encode image contents for LLM
+            encoded_image = base64.b64encode(self.get_image_bytes(image=img, output_format="PNG",
+                                                                  max_bytes=self.pdf_image_max_bytes,
+                                                                  current_dpi=self.pdf_image_dpi)).decode('utf-8')
             # call out to the LLM and process the returned JSON
             response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(prompt=[
                     HumanMessage(content=[
