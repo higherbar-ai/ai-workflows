@@ -16,7 +16,6 @@
 
 from openai import OpenAI, AzureOpenAI
 from anthropic import Anthropic, AnthropicBedrock
-from openai.types.chat.completion_create_params import ResponseFormat
 from langsmith import traceable, get_current_run_tree
 from langsmith.wrappers import wrap_openai
 import concurrent.futures
@@ -278,7 +277,7 @@ class LLMInterface:
         if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
             result = self.llm.chat.completions.create(model=self.model, messages=prompt, max_tokens=self.max_tokens,
                                                       temperature=self.temperature,
-                                                      response_format=ResponseFormat(type="json_object"))
+                                                      response_format={"type": "json_object"})
             # extract the message from the response
             message = result.choices[0].message
             # check for a refusal
