@@ -39,17 +39,16 @@ Then install ``libreoffice`` for converting Office documents to PDF.
     # install LibreOffice for document processing
     choco install -y libreoffice
 
+Finally, if you're accessing models via AWS Bedrock, the AWS CLI needs to be installed and configured for AWS access.
 
 Overview
 ---------
 
 Here are the basics:
 
-#. The ``llm_utilities`` module provides a simple interface for interacting with a large language model (LLM) via the
-   `LangChain API <https://python.langchain.com/docs/>`_. It includes the ``LLMInterface`` class that can be used to
-   interact with OpenAI's models in "JSON mode," so that you get structured responses parsed to dictionaries for
-   programmatic use.
-
+#. The ``llm_utilities`` module provides a simple interface for interacting with a large language model (LLM). It
+   includes the ``LLMInterface`` class that can be used to interact with OpenAI's models in "JSON mode," so that you
+   get structured responses parsed to dictionaries for programmatic use.
 #. The ``document_utilities`` module provides an interface for extracting Markdown-formatted text from various file
    formats. It includes functions for reading Word, PDF, Excel, CSV, and HTML files, and then converting them into
    Markdown for use in LLM interactions. Simply create a ``DocumentInterface`` object and then call
@@ -157,6 +156,12 @@ are:
 The more detail you provide, the better the LLM will do at the JSON conversion.
 
 If you find that things aren't working well, try including some few-shot examples in the ``json_output_spec`` parameter.
+
+Known issues
+^^^^^^^^^^^^
+
+LangSmith tracing support is not as good for Anthropic as it is for OpenAI. Specifically: attached images don't show in
+the traces and, while token usage does appear in the metadata, the UI doesn't show token usage nicely.
 
 Roadmap
 -------
