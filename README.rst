@@ -160,8 +160,10 @@ If you find that things aren't working well, try including some few-shot example
 Known issues
 ^^^^^^^^^^^^
 
-LangSmith tracing support is not as good for Anthropic as it is for OpenAI. Specifically: attached images don't show in
-the traces and, while token usage does appear in the metadata, the UI doesn't show token usage nicely.
+#. The example Google Colab notebooks pop up a message during installation that offers to restart the runtime. You have
+   to click cancel so as not to interrupt execution.
+#. LangSmith tracing support is not as good for Anthropic as it is for OpenAI. Specifically: attached images don't show
+   in traces and, while token usage does appear in the metadata, the UI doesn't show token usage nicely.
 
 Roadmap
 -------
