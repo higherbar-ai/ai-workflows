@@ -14,31 +14,35 @@
 
 """Utilities for interacting with LLMs in AI workflows."""
 
-from langchain_openai.chat_models.base import ChatOpenAI
-from langchain_openai.chat_models.azure import AzureChatOpenAI
-from langchain_aws import ChatBedrock
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessage, HumanMessage
+from openai import OpenAI, AzureOpenAI
+from anthropic import Anthropic, AnthropicBedrock
+from openai.types.chat.completion_create_params import ResponseFormat
+from langsmith import traceable, get_current_run_tree
+from langsmith.wrappers import wrap_openai
 import concurrent.futures
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import json
 import os
 from jsonschema import validate, ValidationError, SchemaError
 import re
+from PIL import Image
+import io
+import base64
 
 
 class LLMInterface:
     """Utility class for interacting with LLMs in AI workflows."""
 
-    # class-level member variables
+    # member variables
     temperature: float
     total_response_timeout_seconds: int
     number_of_retries: int
     seconds_between_retries: int
-    llm: ChatOpenAI | AzureChatOpenAI | None
-    model: str = ""
+    llm: OpenAI | AzureOpenAI | Anthropic | AnthropicBedrock | None
+    model: str
     json_retries: int = 2
     max_tokens: int = 16384
+    using_langsmith: bool = False
 
     def __init__(self, openai_api_key: str = None, openai_model: str = None, temperature: float = 0.0,
                  total_response_timeout_seconds: int = 600, number_of_retries: int = 2,
@@ -104,6 +108,7 @@ class LLMInterface:
             os.environ["LANGCHAIN_PROJECT"] = langsmith_project
             os.environ["LANGCHAIN_ENDPOINT"] = langsmith_endpoint
             os.environ["LANGCHAIN_API_KEY"] = langsmith_api_key
+            self.using_langsmith = True
 
         # configure model and request settings
         self.temperature = temperature
@@ -116,37 +121,32 @@ class LLMInterface:
         else:
             self.max_tokens = 16384 if openai_api_key or azure_api_key else 4096
 
-        # initialize LangChain LLM access
+        # initialize LLM access
         if openai_api_key:
-            self.llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=temperature, model_name=openai_model,
-                                  model_kwargs={"response_format": {"type": "json_object"}}, max_tokens=self.max_tokens)
-            # assume model is the model name for OpenAI
+            self.llm = OpenAI(api_key=openai_api_key)
+            if self.using_langsmith:
+                # wrap OpenAI API with LangSmith for tracing
+                self.llm = wrap_openai(self.llm)
             self.model = openai_model
         elif azure_api_key:
-            self.llm = AzureChatOpenAI(openai_api_key=azure_api_key, temperature=temperature,
-                                       deployment_name=azure_api_engine, azure_endpoint=azure_api_base,
-                                       openai_api_version=azure_api_version, openai_api_type="azure",
-                                       model_kwargs={"response_format": {"type": "json_object"}},
-                                       max_tokens=self.max_tokens)
-            # assume model is the engine name for Azure
+            self.llm = AzureOpenAI(api_key=azure_api_key, azure_deployment=azure_api_engine,
+                                   azure_endpoint=azure_api_base, api_version=azure_api_version)
+            if self.using_langsmith:
+                # wrap AzureOpenAI API with LangSmith for tracing
+                self.llm = wrap_openai(self.llm, chat_name="ChatAzureOpenAI", completions_name="AzureOpenAI")
+            # the Azure deployment name is the model name for Azure
             self.model = azure_api_engine
         elif bedrock_model:
             if bedrock_aws_profile:
                 # if we have an AWS profile, use it to configure Bedrock
-                self.llm = ChatBedrock(credentials_profile_name=bedrock_aws_profile, model_id=bedrock_model,
-                                       region_name=bedrock_region,
-                                       model_kwargs={"temperature": temperature, "max_tokens": self.max_tokens})
+                self.llm = AnthropicBedrock(aws_profile=bedrock_aws_profile, aws_region=bedrock_region)
             else:
                 # otherwise, assume that credentials are in AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and
-                # AWS_SESSION_TOKEN environment variables
-                self.llm = ChatBedrock(model_id=bedrock_model, region_name=bedrock_region,
-                                       model_kwargs={"temperature": temperature, "max_tokens": self.max_tokens})
-            # assume model is the model name for Bedrock
+                # AWS_SESSION_TOKEN environment variables, or otherwise pre-configured via the CLI
+                self.llm = AnthropicBedrock(aws_region=bedrock_region)
             self.model = bedrock_model
         elif anthropic_api_key:
-            self.llm = ChatAnthropic(api_key=anthropic_api_key, model=anthropic_model, temperature=temperature,
-                                     max_tokens=self.max_tokens)
-            # assume model is the model name for Anthropic
+            self.llm = Anthropic(api_key=anthropic_api_key)
             self.model = anthropic_model
         else:
             raise ValueError("Must supply either OpenAI, Azure, Anthropic, or Bedrock parameters for LLM access.")
@@ -169,8 +169,8 @@ class LLMInterface:
         # execute LLM evaluation, but catch and return any exceptions
         try:
             # invoke LLM and parse+validate JSON response
-            result = self.llm.invoke(prompt)
-            json_objects = self.extract_json(result.content)
+            result = self.get_llm_response(prompt)
+            json_objects = self.extract_json(result)
             validation_error = self._json_validation_error(json_objects, json_validation_schema)
 
             if validation_error and self.json_retries > 0:
@@ -179,29 +179,29 @@ class LLMInterface:
                 while retries < self.json_retries:
                     if isinstance(prompt, str):
                         # if the prompt was a string, convert to list for the retry
-                        retry_prompt = [HumanMessage(content=prompt)]
+                        retry_prompt = [self.user_message(prompt)]
                     else:
                         # otherwise, make copy of the prompt list for retry
                         retry_prompt = prompt.copy()
                     # add original response
-                    retry_prompt.append(AIMessage(content=result.content))
+                    retry_prompt.append(self.ai_message(result))
                     # add retry prompt, with or without a schema to guide the retry
                     if json_validation_schema:
-                        retry_prompt.append(HumanMessage(content=f"Your JSON response was invalid. Please correct it "
-                                                                 f"and respond with valid JSON (with no code block "
-                                                                 f"or other content). Just 100% valid JSON, according "
-                                                                 f"to the instructions given. Your JSON response "
-                                                                 f"should match the following schema:\n\n"
-                                                                 f"{json_validation_schema}\n\nYour JSON response:"))
+                        retry_prompt.append(self.user_message(f"Your JSON response was invalid. Please correct it "
+                                                              f"and respond with valid JSON (with no code block "
+                                                              f"or other content). Just 100% valid JSON, according "
+                                                              f"to the instructions given. Your JSON response "
+                                                              f"should match the following schema:\n\n"
+                                                              f"{json_validation_schema}\n\nYour JSON response:"))
                     else:
-                        retry_prompt.append(HumanMessage(content=f"Your JSON response was invalid. Please correct it "
-                                                                 f"and respond with valid JSON (with no code block "
-                                                                 f"or other content). Just 100% valid JSON, according "
-                                                                 f"to the instructions given:"))
+                        retry_prompt.append(self.user_message(f"Your JSON response was invalid. Please correct it "
+                                                              f"and respond with valid JSON (with no code block "
+                                                              f"or other content). Just 100% valid JSON, according "
+                                                              f"to the instructions given:"))
 
                     # retry
-                    result = self.llm.invoke(retry_prompt)
-                    json_objects = self.extract_json(result.content)
+                    result = self.get_llm_response(retry_prompt)
+                    json_objects = self.extract_json(result)
                     validation_error = self._json_validation_error(json_objects, json_validation_schema)
                     retries += 1
 
@@ -217,7 +217,7 @@ class LLMInterface:
             return None, "", str(caught_e)
 
         # return result
-        return json_objects[0] if not validation_error else None, result.content, validation_error
+        return json_objects[0] if not validation_error else None, result, validation_error
 
     def llm_json_response_with_timeout(self, prompt: str | list, json_validation_schema: str = "") \
             -> tuple[dict | None, str, str]:
@@ -258,6 +258,235 @@ class LLMInterface:
             return result
 
         return _llm_json_response_with_timeout(prompt, json_validation_schema)
+
+    @traceable(run_type="llm", name="ai_workflows.llm_utilities.get_llm_response")
+    def get_llm_response(self, prompt: str | list) -> str:
+        """
+        Call out to LLM for a response to a prompt.
+
+        :param prompt: Prompt to send to the LLM (simple string or list of user and assistant messages).
+        :type prompt: str | list
+        :return: Content of the LLM response.
+        :rtype: str
+        """
+
+        # if prompt is a string, convert to message list for consistency
+        if isinstance(prompt, str):
+            prompt = [self.user_message(prompt)]
+
+        # execute LLM evaluation, with appropriate parameters, depending on the LLM type
+        if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+            result = self.llm.chat.completions.create(model=self.model, messages=prompt, max_tokens=self.max_tokens,
+                                                      temperature=self.temperature,
+                                                      response_format=ResponseFormat(type="json_object"))
+            # extract the message from the response
+            message = result.choices[0].message
+            # check for a refusal
+            if hasattr(message, 'refusal') and message.refusal:
+                raise RuntimeError(f"OpenAI refused to generate a response: {message.refusal}")
+            # otherwise, return the content
+            retval = message.content
+        elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
+            # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
+            if self.using_langsmith:
+                # grab the run tree and add starting metadata
+                rt = get_current_run_tree()
+                rt.metadata["model"] = self.model
+                rt.metadata["max_tokens"] = self.max_tokens
+                rt.metadata["temperature"] = self.temperature
+                # call Anthropic
+                result = self.llm.messages.create(model=self.model, messages=prompt, max_tokens=self.max_tokens,
+                                                  temperature=self.temperature)
+                # add usage metadata to the run tree (but it won't show nicely in the UI)
+                # (to show it nicely, we'd need to return a dict with a usage key and the content)
+                rt.add_metadata({
+                    "usage": {
+                        "prompt_tokens": result.usage.input_tokens,
+                        "completion_tokens": result.usage.output_tokens,
+                        "total_tokens": result.usage.input_tokens + result.usage.output_tokens
+                    }})
+            else:
+                result = self.llm.messages.create(model=self.model, messages=prompt, max_tokens=self.max_tokens,
+                                                  temperature=self.temperature)
+            retval = ''.join(block.text for block in result.content)
+        else:
+            raise ValueError("LLM type not recognized.")
+
+        # return the content of the LLM response
+        return retval
+
+    def ai_message(self, ai_message: str) -> dict:
+        """
+        Generate an AI message.
+
+        This function takes an AI message and returns it in the message format expected by the LLM.
+
+        :param ai_message: AI message to format.
+        :type ai_message: str
+        :return: Formatted AI message.
+        :rtype: dict
+        """
+
+        # all LLMs use the same format
+        retval = {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "text",
+                    "text": ai_message
+                }
+            ]
+        }
+
+        # return user message
+        return retval
+
+    def user_message(self, user_message: str) -> dict:
+        """
+        Generate a user message.
+
+        This function takes a user message and returns it in the message format expected by the LLM.
+
+        :param user_message: User message to format.
+        :type user_message: str
+        :return: Formatted user message.
+        :rtype: dict
+        """
+
+        # all LLMs use the same format
+        retval = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": user_message
+                }
+            ]
+        }
+
+        # return user message
+        return retval
+
+    def user_message_with_image(self, user_message: str, image: Image.Image, max_bytes: int | None = None,
+                                current_dpi: int | None = None) -> dict:
+        """
+        Generate a user message with an embedded image.
+
+        This function takes a user message and an image and returns a combined message with the image embedded.
+
+        :param user_message: User message to include with the image.
+        :type user_message: str
+        :param image: Image to embed in the message.
+        :type image: Image.Image
+        :param max_bytes: Maximum size in bytes for the image. If the image is larger than this, it will be resized to
+            fit within the limit. Default is None, which means no limit. (If you specify a limit, you must also specify
+            the current DPI of the image.)
+        :type max_bytes: int | None
+        :param current_dpi: Current DPI of the image. Defaults to None but must be set if max_bytes is specified.
+        :type current_dpi: int | None
+        :return: Combined message with the image embedded.
+        :rtype: dict
+        """
+
+        # convert image to bytes
+        image_bytes = self.get_image_bytes(image=image, output_format="PNG", max_bytes=max_bytes,
+                                           current_dpi=current_dpi)
+
+        # encode image bytes as base64
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        # return appropriate message format depending on the LLM
+        if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+            # note that OpenAI requires the text to be first and the image second, otherwise it refuses the request
+            retval = {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": user_message
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{image_base64}"},
+                    }
+                ]
+            }
+        elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
+            retval = {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": image_base64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": user_message
+                    }
+                ]
+            }
+        else:
+            raise ValueError("LLM type not recognized.")
+
+        # return combined message with image
+        return retval
+
+    @staticmethod
+    def get_image_bytes(image: Image.Image, output_format: str = 'PNG', max_bytes: int | None = None,
+                        current_dpi: int | None = None) -> bytes:
+        """
+        Convert a PIL Image to bytes in the specified format.
+
+        This function takes a PIL Image object and converts it to a byte array in the specified format.
+
+        :param image: PIL Image to convert.
+        :type image: Image.Image
+        :param output_format: Output format for the image (default is 'PNG').
+        :type output_format: str
+        :param max_bytes: Maximum size in bytes for the image. If the image is larger than this, it will be resized to
+            fit within the limit. Default is None, which means no limit. (If you specify a limit, you must also specify
+            the current DPI of the image.)
+        :type max_bytes: int | None
+        :param current_dpi: Current DPI of the image. Defaults to None but must be set if max_bytes is specified.
+        :type current_dpi: int | None
+        :return: Bytes representing the image in the specified format.
+        :rtype: bytes
+        """
+
+        # validate parameters
+        if max_bytes is not None and current_dpi is None:
+            raise ValueError("If max_bytes is specified, current_dpi must also be specified.")
+
+        dpi = current_dpi
+        while True:
+            # save the image with current DPI
+            img_byte_arr = io.BytesIO()
+            save_kwargs = {
+                "format": output_format,
+                "optimize": True
+            }
+            if max_bytes and dpi:
+                save_kwargs["dpi"] = (dpi, dpi)
+            image.save(img_byte_arr, **save_kwargs)
+            current_bytes = img_byte_arr.getvalue()
+
+            # if no max_bytes specified or size is under limit, return the bytes
+            if max_bytes is None or len(current_bytes) <= max_bytes:
+                return current_bytes
+
+            # if image is too large, reduce DPI by 10%
+            dpi = int(dpi * 0.9)
+
+            # if DPI gets too low, raise an error
+            if dpi < 50:  # 72 DPI is typically considered the minimum for screen display, so 50 would be quite low
+                raise RuntimeError(
+                    f"Unable to reduce image to meet size limit of {max_bytes} bytes. "
+                    f"Current size: {len(current_bytes)} bytes"
+                )
 
     def generate_json_schema(self, json_output_spec: str) -> str:
         """

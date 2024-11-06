@@ -19,9 +19,6 @@ import fitz  # (PyMuPDF)
 from fitz.utils import get_pixmap
 import pymupdf4llm
 from PIL import Image
-import io
-import base64
-from langchain_core.messages import HumanMessage
 import json
 import subprocess
 import os
@@ -404,8 +401,7 @@ Your JSON response precisely following the instructions given above the Markdown
 
         # for now, process all in one go (assumes it all fits in the LLM context window)
         response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(
-                prompt=[HumanMessage(content=[{"type": "text", "text": json_prompt}])],
-                json_validation_schema=json_output_schema)
+            prompt=json_prompt, json_validation_schema=json_output_schema)
 
         # raise exception on error
         if error:
@@ -516,57 +512,6 @@ class PDFDocumentConverter:
 
         doc.close()
         return images
-
-    def get_image_bytes(self, image: Image.Image, output_format: str = 'PNG', max_bytes: int | None = None,
-                        current_dpi: int | None = None) -> bytes:
-        """
-        Convert a PIL Image to bytes in the specified format.
-
-        This function takes a PIL Image object and converts it to a byte array in the specified format.
-
-        :param image: PIL Image to convert.
-        :type image: Image.Image
-        :param output_format: Output format for the image (default is 'PNG').
-        :type output_format: str
-        :param max_bytes: Maximum size in bytes for the image. If the image is larger than this, it will be resized to
-            fit within the limit. Default is None, which means no limit.
-        :type max_bytes: int | None
-        :param current_dpi: DPI of the image. If the image is resized, this will be used to calculate the new DPI.
-            Default is None, which means the DPI will be assumed to be the default PDF DPI set at the class level.
-        :type current_dpi: int | None
-        :return: Bytes representing the image in the specified format.
-        :rtype: bytes
-        """
-
-        # start with our current DPI
-        if current_dpi is None:
-            dpi = self.pdf_image_dpi
-        else:
-            dpi = current_dpi
-        while True:
-            # save the image with current DPI
-            img_byte_arr = io.BytesIO()
-            image.save(
-                img_byte_arr,
-                format=output_format,
-                optimize=True,
-                dpi=(dpi, dpi)
-            )
-            current_bytes = img_byte_arr.getvalue()
-
-            # if no max_bytes specified or size is under limit, return the bytes
-            if max_bytes is None or len(current_bytes) <= max_bytes:
-                return current_bytes
-
-            # if image is too large, reduce DPI by 10%
-            dpi = int(dpi * 0.9)
-
-            # if DPI gets too low, raise an error
-            if dpi < 50:  # 72 DPI is typically considered the minimum for screen display, so 50 would be quite low
-                raise RuntimeError(
-                    f"Unable to reduce image to meet size limit of {max_bytes} bytes. "
-                    f"Current size: {len(current_bytes)} bytes"
-                )
 
     @staticmethod
     def _starts_with_heading(content: str) -> bool:
@@ -737,16 +682,13 @@ Your JSON response precisely following the instructions above:"""
         for i, img in enumerate(images):
             logging.log(logging.INFO, f"Processing PDF page {i + 1}: Size={img.size}, Mode={img.mode}")
 
-            # encode image contents for LLM
-            encoded_image = base64.b64encode(self.get_image_bytes(image=img, output_format="PNG",
-                                                                  max_bytes=self.pdf_image_max_bytes,
-                                                                  current_dpi=self.pdf_image_dpi)).decode('utf-8')
+            # construct the prompt with the image
+            prompt_with_image = [self.llm_interface.user_message_with_image(
+                user_message=image_prompt, image=img, max_bytes=self.pdf_image_max_bytes,
+                current_dpi=self.pdf_image_dpi)]
             # call out to the LLM and process the returned JSON
-            response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(prompt=[
-                    HumanMessage(content=[
-                        {"type": "text", "text": image_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded_image}"}},
-                    ])], json_validation_schema=json_output_schema)
+            response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(
+                prompt=prompt_with_image, json_validation_schema=json_output_schema)
 
             # raise exception on error
             if error:

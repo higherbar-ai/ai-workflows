@@ -1,13 +1,8 @@
 unstructured[all-docs]
-langchain-core>=0.2.0,<0.3
-langchain>=0.2.0,<0.3
-langchain-openai==0.1.19
-langchain-anthropic>=0.1.0,<0.2
-langchain-aws>=0.1.0,<0.2
-langchain>=0.2.0,<0.3
+openai
+anthropic[bedrock]
+tiktoken
 langsmith>=0.1.63,<0.2
-tiktoken>=0.7.0,<1.0.0
-openai==1.37.1
 tenacity
 PyMuPDF
 pymupdf4llm
