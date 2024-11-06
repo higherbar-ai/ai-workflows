@@ -16,14 +16,14 @@
 
 from langchain_openai.chat_models.base import ChatOpenAI
 from langchain_openai.chat_models.azure import AzureChatOpenAI
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
+from langchain_aws import ChatBedrock
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import AIMessage, HumanMessage
 import concurrent.futures
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import json
 import os
 from jsonschema import validate, ValidationError, SchemaError
-from langchain_aws import ChatBedrock
-from langchain_anthropic import ChatAnthropic
 import re
 
 
@@ -38,6 +38,7 @@ class LLMInterface:
     llm: ChatOpenAI | AzureChatOpenAI | None
     model: str = ""
     json_retries: int = 2
+    max_tokens: int = 16384
 
     def __init__(self, openai_api_key: str = None, openai_model: str = None, temperature: float = 0.0,
                  total_response_timeout_seconds: int = 600, number_of_retries: int = 2,
@@ -45,7 +46,8 @@ class LLMInterface:
                  azure_api_base: str = None, azure_api_version: str = None, langsmith_api_key: str = None,
                  langsmith_project: str = 'ai_workflows', langsmith_endpoint: str = 'https://api.smith.langchain.com',
                  json_retries: int = 2, anthropic_api_key: str = None, anthropic_model: str = None,
-                 bedrock_model: str = None, bedrock_region: str = "us-east-1", bedrock_aws_profile: str = None):
+                 bedrock_model: str = None, bedrock_region: str = "us-east-1", bedrock_aws_profile: str = None,
+                 max_tokens: int = None):
         """
         Initialize the LLM interface for LLM interactions.
 
@@ -91,6 +93,9 @@ class LLMInterface:
         :type bedrock_region: str
         :param bedrock_aws_profile: AWS profile for Bedrock access. Default is None.
         :type bedrock_aws_profile: str
+        :param max_tokens: Maximum tokens for LLM responses. Default is None, which auto-sets to 16384 for OpenAI and
+            4096 for Anthropic.
+        :type max_tokens: int
         """
 
         # initialize LangSmith API (if key specified)
@@ -106,34 +111,41 @@ class LLMInterface:
         self.number_of_retries = number_of_retries
         self.seconds_between_retries = seconds_between_retries
         self.json_retries = json_retries
+        if max_tokens:
+            self.max_tokens = max_tokens
+        else:
+            self.max_tokens = 16384 if openai_api_key or azure_api_key else 4096
 
         # initialize LangChain LLM access
         if openai_api_key:
             self.llm = ChatOpenAI(openai_api_key=openai_api_key, temperature=temperature, model_name=openai_model,
-                                  model_kwargs={"response_format": {"type": "json_object"}})
+                                  model_kwargs={"response_format": {"type": "json_object"}}, max_tokens=self.max_tokens)
             # assume model is the model name for OpenAI
             self.model = openai_model
         elif azure_api_key:
             self.llm = AzureChatOpenAI(openai_api_key=azure_api_key, temperature=temperature,
                                        deployment_name=azure_api_engine, azure_endpoint=azure_api_base,
                                        openai_api_version=azure_api_version, openai_api_type="azure",
-                                       model_kwargs={"response_format": {"type": "json_object"}})
+                                       model_kwargs={"response_format": {"type": "json_object"}},
+                                       max_tokens=self.max_tokens)
             # assume model is the engine name for Azure
             self.model = azure_api_engine
         elif bedrock_model:
             if bedrock_aws_profile:
                 # if we have an AWS profile, use it to configure Bedrock
                 self.llm = ChatBedrock(credentials_profile_name=bedrock_aws_profile, model_id=bedrock_model,
-                                       region_name=bedrock_region, model_kwargs={"temperature": temperature})
+                                       region_name=bedrock_region,
+                                       model_kwargs={"temperature": temperature, "max_tokens": self.max_tokens})
             else:
                 # otherwise, assume that credentials are in AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and
                 # AWS_SESSION_TOKEN environment variables
                 self.llm = ChatBedrock(model_id=bedrock_model, region_name=bedrock_region,
-                                       model_kwargs={"temperature": temperature})
-            # assume model is the model name for OpenAI
+                                       model_kwargs={"temperature": temperature, "max_tokens": self.max_tokens})
+            # assume model is the model name for Bedrock
             self.model = bedrock_model
         elif anthropic_api_key:
-            self.llm = ChatAnthropic(api_key=anthropic_api_key, model=anthropic_model, temperature=temperature)
+            self.llm = ChatAnthropic(api_key=anthropic_api_key, model=anthropic_model, temperature=temperature,
+                                     max_tokens=self.max_tokens)
             # assume model is the model name for Anthropic
             self.model = anthropic_model
         else:
@@ -172,7 +184,7 @@ class LLMInterface:
                         # otherwise, make copy of the prompt list for retry
                         retry_prompt = prompt.copy()
                     # add original response
-                    retry_prompt.append(AIMessage(content=result['raw'].content))
+                    retry_prompt.append(AIMessage(content=result.content))
                     # add retry prompt, with or without a schema to guide the retry
                     if json_validation_schema:
                         retry_prompt.append(HumanMessage(content=f"Your JSON response was invalid. Please correct it "
@@ -207,7 +219,8 @@ class LLMInterface:
         # return result
         return json_objects[0] if not validation_error else None, result.content, validation_error
 
-    def llm_json_response_with_timeout(self, prompt: str | list, json_validation_schema: str = "") -> dict | None:
+    def llm_json_response_with_timeout(self, prompt: str | list, json_validation_schema: str = "") \
+            -> tuple[dict | None, str, str]:
         """
         Call out to LLM for structured JSON response with timeout and retry.
 
@@ -219,8 +232,8 @@ class LLMInterface:
         :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "", which
           means no validation.
         :type json_validation_schema: str
-        :return: JSON response from the LLM (or None if no response).
-        :rtype: dict
+        :return: Tuple with parsed JSON response, raw LLM response, and error message (if any).
+        :rtype: tuple(dict | None, str, str)
         """
 
         # define the retry decorator inside the method (so that we can use instance variables)
@@ -232,15 +245,16 @@ class LLMInterface:
         )
 
         @retry_decorator
-        def _llm_json_response_with_timeout(inner_prompt: str | list, validation_schema: str = "") -> dict | None:
+        def _llm_json_response_with_timeout(inner_prompt: str | list, validation_schema: str = "") \
+                -> tuple[dict | None, str, str]:
             try:
                 # run async request on separate thread, wait for result with timeout and automatic retry
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(self.llm_json_response, inner_prompt, validation_schema)
                     result = future.result(timeout=self.total_response_timeout_seconds)
             except Exception as caught_e:
-                # format error result like success result
-                result = {"raw": BaseMessage(type="ERROR", content=f"{caught_e}")}
+                # catch and return the error with no response
+                return None, "", str(caught_e)
             return result
 
         return _llm_json_response_with_timeout(prompt, json_validation_schema)

@@ -96,8 +96,7 @@ By default, the ``LLMInterface`` class will retry twice if an LLM response doesn
 provided (if any), but you can change this behavior by specifying the ``json_retries`` parameter in the constructor.
 
 Currently, the ``LLMInterface`` class supports OpenAI models, either directly from OpenAI or via Azure, or the
-Anthropic models, either directly or via AWS Bedrock. However: currently Anthropic's models are rejecting images over
-5MB, which is a problem for document conversion.
+Anthropic models, either directly or via AWS Bedrock.
 
 Markdown conversion
 ^^^^^^^^^^^^^^^^^^^
@@ -168,7 +167,6 @@ There's much that can be improved here. For example:
 * Tracking and reporting LLM costs
 * Improving evaluation and comparison methods
 * Parallelizing LLM calls for faster processing
-* Dealing with Claude's 5MB image limit
 * Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
 * Adding OCR support for PDF files when an LLM isn't available
 
