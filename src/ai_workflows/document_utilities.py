@@ -414,6 +414,72 @@ Your JSON response precisely following the instructions given above the Markdown
         # return results
         return [response_dict]
 
+    @staticmethod
+    def markdown_to_text(markdown: str) -> str:
+        """
+        Convert Markdown text to plain text by removing formatting.
+
+        :param markdown: Input Markdown text to be converted.
+        :type markdown: str
+        :return: Plain text with Markdown formatting removed.
+        :rtype: str
+        """
+
+        # handle empty input
+        if not markdown:
+            return ""
+
+        # remove code blocks and inline code
+        text = re.sub(r'```[\s\S]*?```', '', markdown)
+        text = re.sub(r'`([^`]+)`', r'\1', text)
+
+        # remove headers
+        text = re.sub(r'^#{1,6}\s*(.+)$', r'\1', text, flags=re.MULTILINE)
+
+        # remove horizontal rules
+        text = re.sub(r'^\s*[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+
+        # remove emphasis markers
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # bold
+        text = re.sub(r'\*(.+?)\*', r'\1', text)  # italic
+        text = re.sub(r'__(.+?)__', r'\1', text)  # bold
+        text = re.sub(r'_(.+?)_', r'\1', text)  # italic
+
+        # convert lists to plain text
+        text = re.sub(r'^\s*[-*+]\s+(.+)$', r'\1', text, flags=re.MULTILINE)  # unordered lists
+        text = re.sub(r'^\s*\d+\.\s+(.+)$', r'\1', text, flags=re.MULTILINE)  # ordered lists
+
+        # handle links and images
+        text = re.sub(r'\[([^]]+)]\([^)]+\)', r'\1', text)  # links
+        text = re.sub(r'!\[([^]]*)]([^)]+\))', r'\1', text)  # images
+
+        # handle blockquotes
+        text = re.sub(r'^\s*>\s*(.+)$', r'\1', text, flags=re.MULTILINE)
+
+        # handle tables
+        def clean_table_row(match):
+            # remove leading/trailing pipes and split by pipes
+            row = match.group(0).strip('| \t')
+            cells = [cell.strip() for cell in row.split('|')]
+            return '  '.join(cells)
+
+        # remove table separator lines (containing only |-:)
+        text = re.sub(r'^\|?\s*[:|-]+\s*\|?\s*$', '', text, flags=re.MULTILINE)
+        # convert table rows to space-separated text
+        text = re.sub(r'^\|?.+\|?.+$', clean_table_row, text, flags=re.MULTILINE)
+
+        # remove lines that are exactly "BOXOUT:"
+        text = re.sub(r'^\s*BOXOUT:\s*$', '', text, flags=re.MULTILINE)
+
+        # remove lines with "OTHER:"
+        text = re.sub(r'^\s*OTHER:\s*$', '', text, flags=re.MULTILINE)
+
+        # clean up extra whitespace
+        text = re.sub(r'\n\s*\n+', '\n\n', text)  # standardize newlines to a maximum of two
+        text = text.strip()
+
+        return text
+
 
 class PDFDocumentConverter:
     """Utility class for converting PDF files to Markdown."""
