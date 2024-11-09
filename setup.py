@@ -20,7 +20,7 @@ with open('README.rst') as file:
 
 setup(
     name='py-ai-workflows',
-    version='0.12.0',
+    version='0.13.0',
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
     python_requires='>=3.10',
@@ -37,6 +37,8 @@ setup(
         'openpyxl',
         'nltk==3.9.1',
         'jsonschema',
+        'beautifulsoup4>=4.12.0',
+        'markdown>=3.5.0',
     ],
     package_data={
         'ai_workflows': ['resources/*'], # include resource files in package
