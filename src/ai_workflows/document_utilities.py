@@ -40,6 +40,8 @@ import tempfile
 import logging
 import tiktoken
 import hashlib
+import markdown as mdpackage
+from bs4 import BeautifulSoup
 
 
 class DocumentInterface:
@@ -85,18 +87,21 @@ class DocumentInterface:
         self.pdf_image_dpi = pdf_image_dpi
         self.pdf_image_max_bytes = pdf_image_max_bytes
 
-    def convert_to_markdown(self, filepath: str) -> str:
+    def convert_to_markdown(self, filepath: str, use_text: bool = False) -> str:
         """
         Convert a document to markdown.
 
         :param filepath: Path to the file.
         :type filepath: str
+        :param use_text: Whether to use extracted text to help the LLM with extracting text from the images. Default
+            is False.
+        :type use_text: bool
         :return: Markdown output.
         :rtype: str
         """
 
         # use internal conversion function
-        return self._convert(filepath, to_format="md")
+        return self._convert(filepath, to_format="md", use_text=use_text)
 
     def convert_to_json(self, filepath: str, json_context: str, json_job: str, json_output_spec: str,
                         markdown_first: Optional[bool] = None, json_output_schema: str | None = "") -> list[dict]:
@@ -171,7 +176,8 @@ class DocumentInterface:
                              json_output_schema=json_output_schema)
 
     def _convert(self, filepath: str, to_format: str = "md", json_context: str = "", json_job: str = "",
-                 json_output_spec: str = "", json_output_schema: str | None = "") -> str | list[dict]:
+                 json_output_spec: str = "", json_output_schema: str | None = "",
+                 use_text: bool = False) -> str | list[dict]:
         """
         Convert a document to Markdown or JSON.
 
@@ -197,6 +203,9 @@ class DocumentInterface:
         :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
           schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
         :type json_output_schema: str
+        :param use_text: Whether to use extracted text to help the LLM with extracting text from the images. Default
+            is False.
+        :type use_text: bool
         :return: Markdown output or list of dicts containing JSON results.
         :rtype: str | list[dict]
         """
@@ -222,14 +231,14 @@ class DocumentInterface:
                                                      pdf_image_max_bytes=self.pdf_image_max_bytes)
                 if to_format == "md":
                     # convert to Markdown
-                    return pdf_converter.pdf_to_markdown(filepath)
+                    return pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
                 elif to_format == "json":
                     # convert directly to JSON
                     return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec,
-                                                     json_output_schema)
+                                                     json_output_schema, use_text=use_text)
                 else:
                     # convert to Markdown and then to JSON
-                    markdown = pdf_converter.pdf_to_markdown(filepath)
+                    markdown = pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
                     return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
 
             # convert certain other file types to PDF to then convert with the LLM
@@ -243,14 +252,14 @@ class DocumentInterface:
                                                          pdf_image_max_bytes=self.pdf_image_max_bytes)
                     if to_format == "md":
                         # convert to Markdown
-                        return pdf_converter.pdf_to_markdown(pdf_path)
+                        return pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
                     elif to_format == "json":
                         # convert directly to JSON
                         return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec,
-                                                         json_output_schema)
+                                                         json_output_schema, use_text=use_text)
                     else:
                         # convert to Markdown and then to JSON
-                        markdown = pdf_converter.pdf_to_markdown(pdf_path)
+                        markdown = pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
                         return self.markdown_to_json(markdown, json_context, json_job, json_output_spec,
                                                      json_output_schema)
 
@@ -285,7 +294,7 @@ class DocumentInterface:
                             pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
                                                                  pdf_image_dpi=self.pdf_image_dpi,
                                                                  pdf_image_max_bytes=self.pdf_image_max_bytes)
-                            return pdf_converter.pdf_to_markdown(pdf_path)
+                            return pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
                         else:
                             logging.info(f"{filepath} converted to {len(doc)} pages, which is over the limit "
                                          f"({DocumentInterface.max_xlsx_via_pdf_pages}); converting without images or "
@@ -414,6 +423,29 @@ Your JSON response precisely following the instructions given above the Markdown
         # return results
         return [response_dict]
 
+    @staticmethod
+    def markdown_to_text(markdown: str) -> str:
+        """
+        Convert Markdown text to plain text by removing formatting.
+
+        :param markdown: Input Markdown text to be converted.
+        :type markdown: str
+        :return: Plain text with Markdown formatting removed.
+        :rtype: str
+        """
+
+        # remove lines that have only "BOXOUT:", "FOOTNOTE:", or "OTHER:"
+        markdown = re.sub(r'^BOXOUT:.*$', '', markdown, flags=re.MULTILINE)
+        markdown = re.sub(r'^FOOTNOTE:.*$', '', markdown, flags=re.MULTILINE)
+        markdown = re.sub(r'^OTHER:.*$', '', markdown, flags=re.MULTILINE)
+
+        # convert Markdown to HTML, then to text
+        html = mdpackage.markdown(markdown, extensions=['tables'])
+        soup = BeautifulSoup(html, 'html.parser')
+        text = soup.get_text()
+
+        return text
+
 
 class PDFDocumentConverter:
     """Utility class for converting PDF files to Markdown."""
@@ -462,6 +494,22 @@ class PDFDocumentConverter:
         :rtype: list[Image.Image]
         """
 
+        images_with_text = PDFDocumentConverter.pdf_to_images_and_text(pdf_path, dpi=dpi)
+        return [image for image, _ in images_with_text]
+
+    @staticmethod
+    def pdf_to_images_and_text(pdf_path: str, dpi: int = 150) -> list[(Image.Image, str)]:
+        """
+        Convert a PDF to a list of PIL Images, each with extracted text.
+
+        :param pdf_path: Path to the PDF file.
+        :type pdf_path: str
+        :param dpi: DPI to use for rendering the PDF. Default is 150, which is generally plenty for LLM applications.
+        :type dpi: int
+        :return: List of tuples, one for each page, each with an image and the text extracted from that page.
+        :rtype: list[(Image.Image, str)]
+        """
+
         # open PDF
         doc = fitz.open(pdf_path)
 
@@ -489,7 +537,7 @@ class PDFDocumentConverter:
             return abs(a - b) / max(abs(a), abs(b)) < tol
 
         # second pass to process pages
-        images = []
+        images_with_text = []
         for page in doc:
             # get page dimensions
             page_width = page.rect.width
@@ -501,17 +549,100 @@ class PDFDocumentConverter:
             # convert to PIL Image
             img = Image.frombytes("RGB", (pix.w, pix.h), pix.samples)
 
+            # get page content for text extraction
+            page_dict = page.get_text("dict")
+
             # check if page is a double-page spread
             if approx_equal(page_height, min_page_height) and approx_equal(page_width, 2 * min_page_width):
                 # if so, split the image into two images
                 left_img = img.crop((0, 0, img.width // 2, img.height))
                 right_img = img.crop((img.width // 2, 0, img.width, img.height))
-                images.extend([left_img, right_img])
+
+                # also split the page_dict into two halves
+                left_dict, right_dict = PDFDocumentConverter._split_page_dict(page_dict)
+
+                # add to list
+                images_with_text.extend([(left_img, PDFDocumentConverter._plain_text_from_page_dict(left_dict)),
+                                         (right_img, PDFDocumentConverter._plain_text_from_page_dict(right_dict))])
             else:
-                images.append(img)
+                # add to list
+                images_with_text.append((img, PDFDocumentConverter._plain_text_from_page_dict(page_dict)))
 
         doc.close()
-        return images
+        return images_with_text
+
+    @staticmethod
+    def _split_page_dict(page_dict: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Split a page dictionary into left and right halves.
+
+        :param page_dict: Page dictionary from PyMuPDF.
+        :type page_dict: Dict[str, Any]
+        :return: Tuple of dictionaries for the left and right halves of the page.
+        :rtype: Tuple[Dict[str, Any], Dict[str, Any]]
+        """
+
+        # get page dimensions
+        page_width = page_dict.get("width", 0)
+        mid_x = page_width / 2
+
+        # create new dictionaries for left and right pages
+        left_dict = {
+            "width": mid_x,
+            "height": page_dict.get("height", 0),
+            "blocks": []
+        }
+        right_dict = {
+            "width": mid_x,
+            "height": page_dict.get("height", 0),
+            "blocks": []
+        }
+
+        # process each block in the original page
+        for block in page_dict.get("blocks", []):
+            # get block position
+            block_bbox = block.get("bbox", [0, 0, 0, 0])
+            block_x = block_bbox[0]  # Left edge of block
+            block_width = block_bbox[2] - block_bbox[0]
+            block_center = block_x + (block_width / 2)
+
+            # create a copy of the block
+            new_block = block.copy()
+
+            # adjust block position relative to new page
+            if block_center <= mid_x:
+                # block belongs to left page
+                left_dict["blocks"].append(new_block)
+            else:
+                # block belongs to right page
+                new_bbox = list(block_bbox)
+                new_bbox[0] -= mid_x  # Adjust x coordinates
+                new_bbox[2] -= mid_x
+                new_block["bbox"] = new_bbox
+                right_dict["blocks"].append(new_block)
+
+        return left_dict, right_dict
+
+    @staticmethod
+    def _plain_text_from_page_dict(page_dict: Dict[str, Any]) -> str:
+        """
+        Extract plain text from a page dictionary.
+
+        :param page_dict: Page dictionary from PyMuPDF.
+        :type page_dict: Dict[str, Any]
+        :return: Plain text extracted from the page.
+        :rtype: str
+        """
+
+        plain_text = ""
+        for block in page_dict.get("blocks", []):
+            if block.get("type") == 0:  # text block
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        plain_text += span.get("text", "")
+                    plain_text += "\n"  # newline at the end of each line
+                plain_text += "\n"  # additional newline at the end of each block
+        return plain_text
 
     @staticmethod
     def _starts_with_heading(content: str) -> bool:
@@ -620,7 +751,7 @@ class PDFDocumentConverter:
         return markdown_output.strip()
 
     def pdf_to_json(self, pdf_path: str, json_context: str, json_job: str, json_output_spec: str,
-                    json_output_schema: str | None = "") -> list[dict]:
+                    json_output_schema: str | None = "", use_text: bool = False) -> list[dict]:
         """
         Process a PDF file page-by-page to extract elements and output JSON text.
 
@@ -641,6 +772,9 @@ class PDFDocumentConverter:
         :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
           schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
         :type json_output_schema: str
+        :param use_text: Whether to use extracted text to help the LLM with extracting text from the images. Default
+          is False.
+        :type use_text: bool
         :return: List of parsed results from all pages, one per page, in order.
         :rtype: list[dict]
         """
@@ -650,10 +784,10 @@ class PDFDocumentConverter:
             raise ValueError("LLM interface required for PDF to JSON conversion")
 
         # convert PDF to images
-        images = PDFDocumentConverter.pdf_to_images(pdf_path=pdf_path, dpi=self.pdf_image_dpi)
+        images_and_text = PDFDocumentConverter.pdf_to_images_and_text(pdf_path=pdf_path, dpi=self.pdf_image_dpi)
 
-        # set up for image processing
-        image_prompt = f"""Consider the attached image, which shows a single page (or, sometimes, two facing pages) from a PDF file.
+        # set up for image processing (default case where we're not using text)
+        image_prompt = f"""Consider the attached image, which shows a single page from a PDF file.
 
 {json_context}
 
@@ -678,14 +812,32 @@ Your JSON response precisely following the instructions above:"""
 
         # process each page
         all_dicts = []
-        logging.log(logging.INFO, f"Processing PDF {pdf_path} from {len(images)} images")
-        for i, img in enumerate(images):
+        logging.log(logging.INFO, f"Processing PDF {pdf_path} from {len(images_and_text)} images")
+        for i, (img, txt) in enumerate(images_and_text):
             logging.log(logging.INFO, f"Processing PDF page {i + 1}: Size={img.size}, Mode={img.mode}")
 
             # construct the prompt with the image
+            if use_text and txt:
+                # override image prompt to add text
+                image_prompt = f"""Consider the attached image, which shows a single page from a PDF file.
+
+Here is plain text we have extracted from the image, in case it's helpful (delimited by #|# delimiters), but always use the image to guide your response:
+
+#|#{txt}#|#
+
+{json_context}
+
+{json_job}
+
+{json_output_spec}
+
+Your JSON response precisely following the instructions above:"""
+
+            # assemble prompt
             prompt_with_image = [self.llm_interface.user_message_with_image(
                 user_message=image_prompt, image=img, max_bytes=self.pdf_image_max_bytes,
                 current_dpi=self.pdf_image_dpi)]
+
             # call out to the LLM and process the returned JSON
             response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(
                 prompt=prompt_with_image, json_validation_schema=json_output_schema)
@@ -704,7 +856,7 @@ Your JSON response precisely following the instructions above:"""
         # return all results
         return all_dicts
 
-    def pdf_to_markdown(self, pdf_path: str) -> str:
+    def pdf_to_markdown(self, pdf_path: str, use_text: bool = False) -> str:
         """
         Process a PDF file to extract elements and output Markdown text.
 
@@ -714,6 +866,9 @@ Your JSON response precisely following the instructions above:"""
 
         :param pdf_path: Path to the PDF file.
         :type pdf_path: str
+        :param use_text: Whether to use extracted text to help the LLM with extracting text from the images. Default
+            is False.
+        :type use_text: bool
         :return: Markdown text.
         :rtype: str
         """
@@ -815,7 +970,8 @@ Be sure to follow these JSON instructions faithfully, returning a single `elemen
 }"""
 
         # process PDF to JSON
-        all_dicts = self.pdf_to_json(pdf_path, json_context, json_job, json_output_spec, json_output_schema)
+        all_dicts = self.pdf_to_json(pdf_path, json_context, json_job, json_output_spec, json_output_schema,
+                                     use_text=use_text)
 
         # aggregate all elements into a single list
         all_elements = []
