@@ -187,7 +187,7 @@ Credits
 This toolkit was originally developed by `Higher Bar AI, PBC <https://higherbar.ai>`_, a public benefit corporation. To
 contact us, email us at ``info@higherbar.ai``.
 
-Many thanks to `Laterite <https://www.laterite.com/>`_ for their contributions.
+Many thanks also to `Laterite <https://www.laterite.com/>`_ for their contributions.
 
 Full documentation
 ------------------
