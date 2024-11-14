@@ -44,7 +44,7 @@ setup(
         'ai_workflows': ['resources/*'], # include resource files in package
     },
     url='https://github.com/higherbar-ai/ai-workflows',
-    project_urls={'Documentation': 'https://aiworkflows.readthedocs.io/'},
+    project_urls={'Documentation': 'https://ai-workflows.readthedocs.io/'},
     license='Apache 2.0',
     author='Christopher Robert',
     author_email='crobert@higherbar.ai',

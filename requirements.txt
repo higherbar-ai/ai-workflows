@@ -12,6 +12,7 @@ nltk==3.9.1
 jsonschema
 beautifulsoup4>=4.12.0
 markdown>=3.5.0
+colab-or-not~=0.4.0
 # dev environment
 setuptools~=70.0.0
 twine>=5.0,<6.0
