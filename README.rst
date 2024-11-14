@@ -173,13 +173,18 @@ Roadmap
 
 There's much that can be improved here. For example:
 
-* Unit testing
-* Tracking and reporting LLM costs
-* Improving evaluation and comparison methods
-* Adding automatic retries for LLM refusals
-* Parallelizing LLM calls for faster processing
-* Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
-* Adding OCR support for PDF files when an LLM isn't available
+* For what's already here:
+    * Improving/simplifying Google Colab support in notebooks
+    * Unit testing
+    * Tracking and reporting LLM costs
+    * Improving evaluation and comparison methods
+    * Adding automatic retries for LLM refusals
+    * Parallelizing LLM calls for faster processing
+* Supporting more file formats and conversion methods:
+    * Adding OCR support for PDF files when an LLM isn't available
+    * Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
+    * Integrating IBM's `Docling <https://ds4sd.github.io/docling/>`_ and/or
+      `Data Prep Kit <https://ibm.github.io/data-prep-kit/>`_ toolkits and benchmarking against other ingestion methods
 
 Credits
 -------
@@ -187,7 +192,7 @@ Credits
 This toolkit was originally developed by `Higher Bar AI, PBC <https://higherbar.ai>`_, a public benefit corporation. To
 contact us, email us at ``info@higherbar.ai``.
 
-Many thanks to `Laterite <https://www.laterite.com/>`_ for their contributions.
+Many thanks also to `Laterite <https://www.laterite.com/>`_ for their contributions.
 
 Full documentation
 ------------------
@@ -203,8 +208,8 @@ To develop locally:
 
 #. ``git clone https://github.com/higherbar-ai/ai-workflows``
 #. ``cd ai-workflows``
-#. ``python -m venv venv``
-#. ``source venv/bin/activate``
+#. ``python -m venv .venv``
+#. ``source .venv/bin/activate``
 #. ``pip install -e .``
 #. Execute the ``initial-setup.ipynb`` Jupyter notebook to install system dependencies.
 
