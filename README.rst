@@ -13,7 +13,8 @@ Install the latest version with pip::
 
     pip install py-ai-workflows
 
-You'll also need to install several other dependencies, which you can do by running the ``initial-setup.ipynb`` Jupyter
+You'll also need to install several other dependencies, which you can do by running the
+`initial-setup.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/initial-setup.ipynb>`_ Jupyter
 notebook — or by installing them manually as follows.
 
 First, download NTLK data for natural language text processing::
@@ -41,6 +42,37 @@ Then install ``libreoffice`` for converting Office documents to PDF.
 
 Finally, if you're accessing models via AWS Bedrock, the AWS CLI needs to be installed and configured for AWS access.
 
+Jupyter notebooks with Google Colab support
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can use `the colab-or-not package <https://github.com/higherbar-ai/colab-or-not>`_ to initialize a Jupyter notebook
+for Google Colab or other environments::
+
+    %pip install colab-or-not
+
+    # download NLTK data
+    import nltk
+    nltk.download('punkt', force=True)
+
+    # set up our notebook environment (including LibreOffice)
+    from colab_or_not import NotebookBridge
+    notebook_env = NotebookBridge(
+        system_packages=["libreoffice"],
+        config_path="~/.hbai/ai-workflows.env",
+        config_template={
+            "openai_api_key": "",
+            "openai_model": "",
+            "azure_api_key": "",
+            "azure_api_base": "",
+            "azure_api_engine": "",
+            "azure_api_version": "",
+            "anthropic_api_key": "",
+            "anthropic_model": "",
+            "langsmith_api_key": "",
+        }
+    )
+    notebook_env.setup_environment()
+
 Overview
 ---------
 
@@ -54,15 +86,14 @@ Here are the basics:
    Markdown for use in LLM interactions. Simply create a ``DocumentInterface`` object and then call
    ``convert_to_markdown()`` to convert any file to Markdown. If you provide an ``LLMInterface`` object, the LLM will
    be used to help with high-quality conversion.
-#. The ``example-google-colab-document-processing.ipynb`` notebook provides a simple Google Colab example of how to use
-   the ``document_utilities`` module to convert files to Markdown format.
-#. The ``example-google-colab-surveyeval-lite.ipynb`` notebook provides a more realistic workflow example that uses
-   the ``document_utilities`` module to convert a survey file to Markdown format and then to JSON format, and then
-   uses the ``llm_utilities`` module to evaluate survey questions using an LLM.
-#. The ``example-surveyeval-lite.ipynb`` notebook provides the same example, but in a Jupyter notebook that can be run
-   locally.
-#. The ``example-testing.ipynb`` notebook provides a basic set-up for testing Markdown conversion methods (LLM-assisted
-   vs. not-LLM-assisted).
+#. The `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_ notebook provides a simple example of how to use the ``document_utilities``
+   module to convert files to Markdown format, in either Google Colab or a local environment.
+#. The `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_
+   notebook provides a more realistic workflow example that uses the ``document_utilities`` module to convert a survey
+   file to Markdown format and then to JSON format, and then uses the ``llm_utilities`` module to evaluate survey
+   questions using an LLM. It also works in either Google Colab or a local environment.
+#. The `example-testing.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-testing.ipynb>`_ notebook provides a basic set-up for testing Markdown conversion methods (LLM-assisted
+   vs. not-LLM-assisted). At the moment, this notebook only works in a local environment.
 
 Typical usage::
 
@@ -174,7 +205,6 @@ Roadmap
 There's much that can be improved here. For example:
 
 * For what's already here:
-    * Improving/simplifying Google Colab support in notebooks
     * Unit testing
     * Tracking and reporting LLM costs
     * Improving evaluation and comparison methods
