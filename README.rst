@@ -211,10 +211,15 @@ There's much that can be improved here. For example:
     * Adding automatic retries for LLM refusals
     * Parallelizing LLM calls for faster processing
 * Supporting more file formats and conversion methods:
-    * Adding OCR support for PDF files when an LLM isn't available
-    * Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
     * Integrating IBM's `Docling <https://ds4sd.github.io/docling/>`_ and/or
-      `Data Prep Kit <https://ibm.github.io/data-prep-kit/>`_ toolkits and benchmarking against other ingestion methods
+      `Data Prep Kit <https://ibm.github.io/data-prep-kit/>`_ toolkits and benchmarking against other ingestion and
+      conversion methods
+    * Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
+* Expanding capabilities:
+    * Adding support for more LLMs
+    * Adding basic RAG support
+    * Expanding RAG support for knowledge graphs
+    * Adding some kind of Docker support to extend the RAG/KG implementations to, e.g., ChatGPT via ChatGPT Actions
 
 Credits
 -------
