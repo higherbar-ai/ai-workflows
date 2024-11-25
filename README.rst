@@ -79,7 +79,7 @@ Overview
 Here are the basics:
 
 #. The ``llm_utilities`` module provides a simple interface for interacting with a large language model (LLM). It
-   includes the ``LLMInterface`` class that can be used to interact with OpenAI's models in "JSON mode," so that you
+   includes the ``LLMInterface`` class that can be used to interact with LLMs in "JSON mode," so that you
    get structured responses parsed to dictionaries for programmatic use.
 #. The ``document_utilities`` module provides an interface for extracting Markdown-formatted text from various file
    formats. It includes functions for reading Word, PDF, Excel, CSV, and HTML files, and then converting them into
