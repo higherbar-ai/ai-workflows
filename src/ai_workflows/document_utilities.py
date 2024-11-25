@@ -42,6 +42,8 @@ import tiktoken
 import hashlib
 import markdown as mdpackage
 from bs4 import BeautifulSoup
+from docling.document_converter import DocumentConverter
+from docling.datamodel.base_models import FormatToExtensions
 
 
 class DocumentInterface:
@@ -49,6 +51,7 @@ class DocumentInterface:
 
     # member variables
     via_pdf_file_extensions = [".docx", ".doc", ".pptx"]
+    docling_file_extensions = [f".{ext}" for exts in FormatToExtensions.values() for ext in exts]
     pymupdf_file_extensions = [".pdf", ".xps", ".epub", ".mobi", ".fb2", ".cbz", ".svg", ".txt"]
     libreoffice_file_extensions = [
         ".odt", ".csv", ".db", ".doc", ".docx", ".dotx", ".fodp", ".fods", ".fodt", ".mml", ".odb", ".odf", ".odg",
@@ -308,10 +311,22 @@ class DocumentInterface:
                                 # then fall through to let Unstructured have a try at it
                                 logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
 
-        # otherwise, see if we can use PyMuPDFLLM to convert (includes .pdf, .txt, .svg, .cbz, .epub, .mobi, .xps)
-        if ext in DocumentInterface.pymupdf_file_extensions:
-            markdown = pymupdf4llm.to_markdown(filepath)
-        else:
+        # otherwise, fall back to converting using Docling, PyMuPDF4LLM, or Unstructured (in that preference order)
+        markdown = ""
+        if ext in DocumentInterface.docling_file_extensions:
+            # try to convert using Docling
+            try:
+                doc_converter = DocumentConverter()
+                markdown = doc_converter.convert(filepath).document.export_to_markdown()
+            except Exception as e:
+                logging.warning(f"Error converting {filepath} using Docling: {e}")
+        if not markdown and ext in DocumentInterface.pymupdf_file_extensions:
+            # try to convert using PyMuPDF4LLM
+            try:
+                markdown = pymupdf4llm.to_markdown(filepath)
+            except Exception as e:
+                logging.warning(f"Error converting {filepath} using PyMuPDF4LLM: {e}")
+        if not markdown:
             # otherwise, use Unstructured to convert
             doc_converter = UnstructuredDocumentConverter()
             markdown = doc_converter.convert_to_markdown(filepath)
@@ -875,7 +890,15 @@ Your JSON response precisely following the instructions above:"""
 
         # check for LLM interface
         if self.llm_interface is None:
-            # since no LLM interface, use PyMuPDFLLM to convert PDF to Markdown
+            # since no LLM interface, try using Docling to convert PDF to Markdown
+            try:
+                converter = DocumentConverter()
+                result = converter.convert(pdf_path)
+                return result.document.export_to_markdown()
+            except Exception as e:
+                logging.warning(f"Error converting {pdf_path} using Docling: {e}")
+
+            # if that failed, fall back to PyMuPDF4LLM
             return pymupdf4llm.to_markdown(pdf_path)
 
         # otherwise, we'll use the LLM to process the PDF

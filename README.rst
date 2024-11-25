@@ -131,26 +131,33 @@ Anthropic models, either directly or via AWS Bedrock.
 Markdown conversion
 ^^^^^^^^^^^^^^^^^^^
 
-The ``DocumentInterface.convert_to_markdown()`` method uses one of several methods to convert files to Markdown:
+The ``DocumentInterface.convert_to_markdown()`` method uses one of several methods to convert files to Markdown.
 
-#. If an ``LLMInterface`` is available, PDF files are converted to Markdown with LLM assistance: we split the PDF into
-   pages (splitting double-page spreads as needed), convert each page to an image, and then convert to Markdown using
-   the help of a multimodal LLM. This is the most accurate method, but it's also the most expensive, running at about
-   $0.015 per page as of October 2024. In the process, we try to keep narrative text that flows across pages together,
-   drop page headers and footers, and describe images, charts, and figures as if to a blind person. We also do our best
-   to convert tables to proper Markdown tables.
-#. If an ``LLMInterface`` is not available, we use ``PyMuPDFLLM`` to convert PDF files to Markdown. This method
-   doesn't handle images, charts, or figures, and it's pretty bad at tables, but it does a good job extracting text and
-   a better job adding Markdown formatting than most other libraries. (``PyMuPDFLLM`` also supports a range of other
-   file formats, and we also use it to convert them to Markdown. That includes ``.xps``, ``.epub``, ``.mobi``,
-   ``.fb2``, ``.cbz``, ``.svg``, and ``.txt`` formats.)
+If an ``LLMInterface`` is available:
+
+#. PDF files are converted to Markdown with LLM assistance: we split the PDF into pages (splitting double-page spreads
+   as needed), convert each page to an image, and then convert to Markdown using the help of a multimodal LLM. This is
+   the most accurate method, but it's also the most expensive, running at about $0.015 per page as of October 2024. In
+   the process, we try to keep narrative text that flows across pages together, drop page headers and footers, and
+   describe images, charts, and figures as if to a blind person. We also do our best to convert tables to proper
+   Markdown tables. If the ``use_text`` parameter is set to ``True``, we'll extract the raw text from each page (when
+   possible) and provide that to the LLM to assist it with the conversion.
+#. We use LibreOffice to convert ``.docx``, ``.doc``, and ``.pptx`` files to PDF and then convert the PDF to Markdown
+   using the LLM assistance method described above.
 #. For ``.xlsx`` files without charts or images, we use a custom parser to convert worksheets and table ranges to proper
-   Markdown tables. If there are charts or images and we have an ``LLMInterface`` available, we use LibreOffice to
-   convert to PDF and, if it's 10 pages or fewer, we convert from the PDF to Markdown using the LLM assistance method
-   described above. If it's more than 10 pages, we fall back to the ``Unstructured`` method described below.
-#. If we have an ``LLMInterface`` available, we use LibreOffice to convert ``.docx``, ``.doc``, and ``.pptx`` files to
-   PDF and then convert the PDF to Markdown using the LLM assistance method described above. Otherwise, we fall back to
-   the ``Unstructured`` method described below.
+   Markdown tables. If there are charts or images, we use LibreOffice to convert to PDF and, if it's 10 pages or fewer,
+   we convert from the PDF to Markdown using the LLM assistance method described above. If it's more than 10 pages,
+   we fall back to dropping charts or images and converting without LLM assistance.
+#. For other file types, we fall back to converting without LLM assistance, as described below.
+
+Otherwise, we convert files to Markdown using one of the following methods (in order of preference):
+
+#. For ``.xlsx`` files, we use a custom parser and Markdown formatter.
+#. Otherwise, we use IBM's ``Docling`` package for those file formats that it supports. This method drops images,
+   charts, and figures, but it does a nice job with tables and automatically uses OCR when needed.
+#. If ``Docling`` fails or doesn't support a file format, we next try ``PyMuPDFLLM``, which supports PDF files and a
+   range of other formats. This method also drops images, charts, and figures, and it's pretty bad at tables, but it
+   does a good job extracting text and a better job adding Markdown formatting than most other libraries.
 #. Finally, if we haven't managed to convert the file using one of the higher-quality methods described above, we use
    the ``Unstructured`` library to parse the file into elements and then add basic Markdown formatting. This method is
    fast and cheap, but it's also the least accurate.
@@ -211,9 +218,6 @@ There's much that can be improved here. For example:
     * Adding automatic retries for LLM refusals
     * Parallelizing LLM calls for faster processing
 * Supporting more file formats and conversion methods:
-    * Integrating IBM's `Docling <https://ds4sd.github.io/docling/>`_ and/or
-      `Data Prep Kit <https://ibm.github.io/data-prep-kit/>`_ toolkits and benchmarking against other ingestion and
-      conversion methods
     * Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
 * Expanding capabilities:
     * Adding support for more LLMs
