@@ -27,6 +27,7 @@ import re
 from PIL import Image
 import io
 import base64
+import json_repair
 
 
 class LLMInterface:
@@ -314,7 +315,8 @@ class LLMInterface:
         # return the content of the LLM response
         return retval
 
-    def ai_message(self, ai_message: str) -> dict:
+    @staticmethod
+    def ai_message(ai_message: str) -> dict:
         """
         Generate an AI message.
 
@@ -340,7 +342,8 @@ class LLMInterface:
         # return user message
         return retval
 
-    def user_message(self, user_message: str) -> dict:
+    @staticmethod
+    def user_message(user_message: str) -> dict:
         """
         Generate a user message.
 
@@ -743,7 +746,13 @@ The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
                 except json.JSONDecodeError:
                     continue
 
-        # return result, which could be an empty list if we didn't manage to find and parse anything
+        # if we still don't have any results, try to automatically repair the JSON
+        if not json_objects:
+            parsed = json_repair.repair_json(text.strip(), return_objects=True, ensure_ascii=False)
+            if parsed and isinstance(parsed, dict):
+                json_objects = [parsed]
+
+        # return result, which could be an empty list if we didn't succeed in finding and parsing any JSON
         return json_objects
 
     @staticmethod
