@@ -225,111 +225,116 @@ class DocumentInterface:
         # extract file extension
         ext = os.path.splitext(filepath)[1].lower()
 
-        # if we have an LLM interface, use it when we can
-        if self.llm_interface is not None:
-            # always convert PDFs with the LLM
-            if ext == '.pdf':
-                # convert PDF using LLM
-                pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface, pdf_image_dpi=self.pdf_image_dpi,
-                                                     pdf_image_max_bytes=self.pdf_image_max_bytes)
-                if to_format == "md":
-                    # convert to Markdown
-                    return pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
-                elif to_format == "json":
-                    # convert directly to JSON
-                    return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec,
-                                                     json_output_schema, use_text=use_text)
-                else:
-                    # convert to Markdown and then to JSON
-                    markdown = pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
-                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
-
-            # convert certain other file types to PDF to then convert with the LLM
-            if ext in DocumentInterface.via_pdf_file_extensions:
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    # convert to PDF in temporary directory
-                    pdf_path = self.convert_to_pdf(filepath, temp_dir)
+        if ext == '.md':
+            # if the input file is already Markdown, read it as-is
+            with open(filepath, 'r', encoding='utf-8') as file:
+                markdown = file.read()
+        else:
+            # otherwise, if we have an LLM interface, use it when we can
+            if self.llm_interface is not None:
+                # always convert PDFs with the LLM
+                if ext == '.pdf':
                     # convert PDF using LLM
-                    pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
-                                                         pdf_image_dpi=self.pdf_image_dpi,
+                    pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface, pdf_image_dpi=self.pdf_image_dpi,
                                                          pdf_image_max_bytes=self.pdf_image_max_bytes)
                     if to_format == "md":
                         # convert to Markdown
-                        return pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                        return pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
                     elif to_format == "json":
                         # convert directly to JSON
-                        return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec,
+                        return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec,
                                                          json_output_schema, use_text=use_text)
                     else:
                         # convert to Markdown and then to JSON
-                        markdown = pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
-                        return self.markdown_to_json(markdown, json_context, json_job, json_output_spec,
-                                                     json_output_schema)
+                        markdown = pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
+                        return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
 
-        # if Excel, see if we can convert to Markdown using our custom converter
-        if ext == '.xlsx':
-            # convert Excel to Markdown using custom converter
-            # (try to keep images and charts if we have an LLM available and we're after Markdown output)
-            result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
-                                (filepath, lose_unsupported_content=(not (self.llm_interface and to_format == "md"))))
-            if result:
-                if to_format == "json":
-                    # if we're after JSON, convert the Markdown to JSON using the LLM
-                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
-                else:
-                    # otherwise, just return the Markdown
-                    return markdown
-            else:
-                # log reason from returned Markdown
-                logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
-
-                # if we have an LLM and we're after Markdown, PDF it and then convert with LLM if we can
-                # (we don't want to use an LLM on Excel files headed for JSON)
-                if self.llm_interface is not None and to_format == "md":
-                    with (tempfile.TemporaryDirectory() as temp_dir):
+                # convert certain other file types to PDF to then convert with the LLM
+                if ext in DocumentInterface.via_pdf_file_extensions:
+                    with tempfile.TemporaryDirectory() as temp_dir:
                         # convert to PDF in temporary directory
                         pdf_path = self.convert_to_pdf(filepath, temp_dir)
-
-                        # check number of PDF pages and only move forward with LLM conversion if it's within the limit
-                        doc = fitz.open(pdf_path)
-                        if len(doc) <= DocumentInterface.max_xlsx_via_pdf_pages:
-                            # convert PDF to Markdown using LLM
-                            pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
-                                                                 pdf_image_dpi=self.pdf_image_dpi,
-                                                                 pdf_image_max_bytes=self.pdf_image_max_bytes)
+                        # convert PDF using LLM
+                        pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
+                                                             pdf_image_dpi=self.pdf_image_dpi,
+                                                             pdf_image_max_bytes=self.pdf_image_max_bytes)
+                        if to_format == "md":
+                            # convert to Markdown
                             return pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                        elif to_format == "json":
+                            # convert directly to JSON
+                            return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec,
+                                                             json_output_schema, use_text=use_text)
                         else:
-                            logging.info(f"{filepath} converted to {len(doc)} pages, which is over the limit "
-                                         f"({DocumentInterface.max_xlsx_via_pdf_pages}); converting without images or "
-                                         f"charts...")
-                            result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
-                                                (filepath, lose_unsupported_content=True))
-                            if result:
-                                return markdown
-                            else:
-                                # log reason from returned Markdown
-                                # then fall through to let Unstructured have a try at it
-                                logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
+                            # convert to Markdown and then to JSON
+                            markdown = pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                            return self.markdown_to_json(markdown, json_context, json_job, json_output_spec,
+                                                         json_output_schema)
 
-        # otherwise, fall back to converting using Docling, PyMuPDF4LLM, or Unstructured (in that preference order)
-        markdown = ""
-        if ext in DocumentInterface.docling_file_extensions:
-            # try to convert using Docling
-            try:
-                doc_converter = DocumentConverter()
-                markdown = doc_converter.convert(filepath).document.export_to_markdown()
-            except Exception as e:
-                logging.warning(f"Error converting {filepath} using Docling: {e}")
-        if not markdown and ext in DocumentInterface.pymupdf_file_extensions:
-            # try to convert using PyMuPDF4LLM
-            try:
-                markdown = pymupdf4llm.to_markdown(filepath)
-            except Exception as e:
-                logging.warning(f"Error converting {filepath} using PyMuPDF4LLM: {e}")
-        if not markdown:
-            # otherwise, use Unstructured to convert
-            doc_converter = UnstructuredDocumentConverter()
-            markdown = doc_converter.convert_to_markdown(filepath)
+            # if Excel, see if we can convert to Markdown using our custom converter
+            if ext == '.xlsx':
+                # convert Excel to Markdown using custom converter
+                # (try to keep images and charts if we have an LLM available and we're after Markdown output)
+                result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
+                                    (filepath, lose_unsupported_content=(not (self.llm_interface and to_format == "md"))))
+                if result:
+                    if to_format == "json":
+                        # if we're after JSON, convert the Markdown to JSON using the LLM
+                        return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
+                    else:
+                        # otherwise, just return the Markdown
+                        return markdown
+                else:
+                    # log reason from returned Markdown
+                    logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
+
+                    # if we have an LLM and we're after Markdown, PDF it and then convert with LLM if we can
+                    # (we don't want to use an LLM on Excel files headed for JSON)
+                    if self.llm_interface is not None and to_format == "md":
+                        with (tempfile.TemporaryDirectory() as temp_dir):
+                            # convert to PDF in temporary directory
+                            pdf_path = self.convert_to_pdf(filepath, temp_dir)
+
+                            # check number of PDF pages and only move forward with LLM conversion if it's within the limit
+                            doc = fitz.open(pdf_path)
+                            if len(doc) <= DocumentInterface.max_xlsx_via_pdf_pages:
+                                # convert PDF to Markdown using LLM
+                                pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
+                                                                     pdf_image_dpi=self.pdf_image_dpi,
+                                                                     pdf_image_max_bytes=self.pdf_image_max_bytes)
+                                return pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                            else:
+                                logging.info(f"{filepath} converted to {len(doc)} pages, which is over the limit "
+                                             f"({DocumentInterface.max_xlsx_via_pdf_pages}); converting without images or "
+                                             f"charts...")
+                                result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
+                                                    (filepath, lose_unsupported_content=True))
+                                if result:
+                                    return markdown
+                                else:
+                                    # log reason from returned Markdown
+                                    # then fall through to let Unstructured have a try at it
+                                    logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
+
+            # otherwise, fall back to converting using Docling, PyMuPDF4LLM, or Unstructured (in that preference order)
+            markdown = ""
+            if ext in DocumentInterface.docling_file_extensions:
+                # try to convert using Docling
+                try:
+                    doc_converter = DocumentConverter()
+                    markdown = doc_converter.convert(filepath).document.export_to_markdown()
+                except Exception as e:
+                    logging.warning(f"Error converting {filepath} using Docling: {e}")
+            if not markdown and ext in DocumentInterface.pymupdf_file_extensions:
+                # try to convert using PyMuPDF4LLM
+                try:
+                    markdown = pymupdf4llm.to_markdown(filepath)
+                except Exception as e:
+                    logging.warning(f"Error converting {filepath} using PyMuPDF4LLM: {e}")
+            if not markdown:
+                # otherwise, use Unstructured to convert
+                doc_converter = UnstructuredDocumentConverter()
+                markdown = doc_converter.convert_to_markdown(filepath)
 
         if to_format in ["json", "mdjson"]:
             # if we're after JSON, convert the Markdown to JSON using the LLM
