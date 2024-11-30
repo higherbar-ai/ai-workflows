@@ -48,7 +48,7 @@ Jupyter notebooks with Google Colab support
 You can use `the colab-or-not package <https://github.com/higherbar-ai/colab-or-not>`_ to initialize a Jupyter notebook
 for Google Colab or other environments::
 
-    %pip install colab-or-not
+    %pip install colab-or-not py-ai-workflows
 
     # download NLTK data
     import nltk
@@ -79,13 +79,10 @@ Overview
 Here are the basics:
 
 #. The ``llm_utilities`` module provides a simple interface for interacting with a large language model (LLM). It
-   includes the ``LLMInterface`` class that can be used to interact with LLMs in "JSON mode," so that you
-   get structured responses parsed to dictionaries for programmatic use.
-#. The ``document_utilities`` module provides an interface for extracting Markdown-formatted text from various file
-   formats. It includes functions for reading Word, PDF, Excel, CSV, and HTML files, and then converting them into
-   Markdown for use in LLM interactions. Simply create a ``DocumentInterface`` object and then call
-   ``convert_to_markdown()`` to convert any file to Markdown. If you provide an ``LLMInterface`` object, the LLM will
-   be used to help with high-quality conversion.
+   includes the ``LLMInterface`` class that can be used for executing individual workflow steps.
+#. The ``document_utilities`` module provides an interface for extracting Markdown-formatted text and structured data
+   from various file formats. It includes functions for reading Word, PDF, Excel, CSV, HTML, and other file formats,
+   and then converting them into Markdown or structured data for use in LLM interactions.
 #. The `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_ notebook provides a simple example of how to use the ``document_utilities``
    module to convert files to Markdown format, in either Google Colab or a local environment.
 #. The `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_
@@ -95,7 +92,17 @@ Here are the basics:
 #. The `example-testing.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-testing.ipynb>`_ notebook provides a basic set-up for testing Markdown conversion methods (LLM-assisted
    vs. not-LLM-assisted). At the moment, this notebook only works in a local environment.
 
-Typical usage::
+Examples
+^^^^^^^^
+
+Converting a file to Markdown format (without LLM assistance)::
+
+    from ai_workflows.document_utilities import DocumentInterface
+
+    doc_interface = DocumentInterface()
+    markdown = doc_interface.convert_to_markdown(file_path)
+
+Converting a file to Markdown format (*with* LLM assistance)::
 
     from ai_workflows.llm_utilities import LLMInterface
     from ai_workflows.document_utilities import DocumentInterface
@@ -103,11 +110,57 @@ Typical usage::
     llm_interface = LLMInterface(openai_api_key=openai_api_key)
     doc_interface = DocumentInterface(llm_interface=llm_interface)
     markdown = doc_interface.convert_to_markdown(file_path)
+
+Converting a file to JSON format::
+
+    from ai_workflows.llm_utilities import LLMInterface
+    from ai_workflows.document_utilities import DocumentInterface
+
+    llm_interface = LLMInterface(openai_api_key=openai_api_key)
+    doc_interface = DocumentInterface(llm_interface=llm_interface)
     dict_list = doc_interface.convert_to_json(
         file_path,
         json_context = "The file contains a survey instrument with questions to be administered to rural Zimbabwean household heads by a trained enumerator.",
         json_job = "Your job is to extract questions and response options from the survey instrument.",
         json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
+    )
+
+Converting a file to JSON format (with automatic JSON schema generation and response validation+retry)::
+
+    from ai_workflows.llm_utilities import LLMInterface
+    from ai_workflows.document_utilities import DocumentInterface
+
+    llm_interface = LLMInterface(openai_api_key=openai_api_key)
+    doc_interface = DocumentInterface(llm_interface=llm_interface)
+    json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
+    json_output_schema = llm_interface.generate_json_schema(json_output_spec)
+    dict_list = doc_interface.convert_to_json(
+        file_path,
+        json_context = "The file contains a survey instrument with questions to be administered to rural Zimbabwean household heads by a trained enumerator.",
+        json_job = "Your job is to extract questions and response options from the survey instrument.",
+        json_output_spec = json_output_spec,
+        json_validation_schema = json_output_schema
+    )
+
+Converting a file to JSON format (with automatic JSON schema generation and response validation+retry) (plus in-memory
+caching of JSON schemas so they aren't generated every time)::
+
+    from ai_workflows.llm_utilities import LLMInterface, JSONSchemaCache
+    from ai_workflows.document_utilities import DocumentInterface
+
+    llm_interface = LLMInterface(openai_api_key=openai_api_key)
+    doc_interface = DocumentInterface(llm_interface=llm_interface)
+    json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
+    json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
+    if not json_output_schema:
+        json_output_schema = llm_interface.generate_json_schema(json_output_spec)
+        JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
+    dict_list = doc_interface.convert_to_json(
+        file_path,
+        json_context = "The file contains a survey instrument with questions to be administered to rural Zimbabwean household heads by a trained enumerator.",
+        json_job = "Your job is to extract questions and response options from the survey instrument.",
+        json_output_spec = json_output_spec,
+        json_validation_schema = json_output_schema
     )
 
 Technical notes
@@ -116,20 +169,72 @@ Technical notes
 LLMInterface
 ^^^^^^^^^^^^
 
-When you use the ``LLMInterface`` class to interact with an LLM, you can provide a formal JSON schema to validate JSON
-responses. If you only have a human-readable description of the JSON output format, you can convert that to a JSON
-schema by calling ``LLMInterface.generate_json_schema()``. This method will convert a human-readable description into a
-formal schema that can be used to validate JSON responses. (The ``DocumentInterface`` class will handle this
-automatically when used to convert documents to JSON. See below for more details.)
+The ``LLMInterface`` class provides a simple LLM interface with the following features:
 
-By default, the ``LLMInterface`` class will retry twice if an LLM response doesn't parse as JSON or match the schema
-provided (if any), but you can change this behavior by specifying the ``json_retries`` parameter in the constructor.
+#. Support for both OpenAI and Anthropic models, either directly or via Azure or AWS Bedrock
 
-Currently, the ``LLMInterface`` class supports OpenAI models, either directly from OpenAI or via Azure, or the
-Anthropic models, either directly or via AWS Bedrock.
+#. Support for both regular and JSON responses (using the LLM provider's "JSON mode" when possible)
+
+#. Optional support for conversation history (tracking and automatic addition to each request)
+
+#. Automatic validation of JSON responses against a formal JSON schema (with automatic retry to correct invalid JSON)
+
+#. Automatic (LLM-based) generation of formal JSON schemas
+
+#. Automatic timeouts for long-running requests
+
+#. Automatic retry for failed requests (OpenAI refusals, timeouts, and other retry-able errors)
+
+#. Support for LangSmith tracing
+
+#. Synchronous and async versions of all functions (async versions begin with ``a_``)
+
+Key methods:
+
+#. ``get_llm_response()``: Get a response from an LLM
+
+#. ``get_json_response()``: Get a JSON response from an LLM
+
+#. ``user_message()``: Get a properly-formatted user message to include in an LLM prompt
+
+#. ``user_message_with_image()``: Get a properly-formatted user message to include in an LLM prompt, including an image
+   attachment
+
+#. ``generate_json_schema()``: Generate a JSON schema from a human-readable description
+
+#. ``count_tokens()``: Count the number of tokens in a string
+
+JSONSchemaCache
+^^^^^^^^^^^^^^^
+
+The ``JSONSchemaCache`` class provides a simple in-memory cache for JSON schemas, so that they don't have to be
+regenerated repeatedly.
+
+Key methods:
+
+#. ``get_json_schema()``: Get a JSON schema from the cache (returns empty string if none found)
+
+#. ``put_json_schema()``: Put a JSON schema into the cache
+
+DocumentInterface
+^^^^^^^^^^^^^^^^^
+
+The ``DocumentInterface`` class provides a simple interface for converting files to Markdown or JSON format.
+
+Key methods:
+
+#. ``convert_to_markdown()``: Convert a file to Markdown format, using an LLM if available and deemed helpful (if you
+   specify ``use_text=True``, it will include raw text in any LLM prompt, which might improve results)
+
+#. ``convert_to_json()``: Convert a file to JSON format using an LLM (if you specify ``markdown_first=True``, it will
+   convert to Markdown first, then convert to JSON; otherwise, it might convert to JSON page-by-page, using an LLM)
+
+#. ``markdown_to_json()``: Convert a Markdown string to JSON format using an LLM
+
+#. ``markdown_to_text()``: Convert a Markdown string to plain text
 
 Markdown conversion
-^^^^^^^^^^^^^^^^^^^
+"""""""""""""""""""
 
 The ``DocumentInterface.convert_to_markdown()`` method uses one of several methods to convert files to Markdown.
 
@@ -153,8 +258,8 @@ If an ``LLMInterface`` is available:
 Otherwise, we convert files to Markdown using one of the following methods (in order of preference):
 
 #. For ``.xlsx`` files, we use a custom parser and Markdown formatter.
-#. Otherwise, we use IBM's ``Docling`` package for those file formats that it supports. This method drops images,
-   charts, and figures, but it does a nice job with tables and automatically uses OCR when needed.
+#. For other file types, we use IBM's ``Docling`` package for those file formats that it supports. This method drops
+   images, charts, and figures, but it does a nice job with tables and automatically uses OCR when needed.
 #. If ``Docling`` fails or doesn't support a file format, we next try ``PyMuPDFLLM``, which supports PDF files and a
    range of other formats. This method also drops images, charts, and figures, and it's pretty bad at tables, but it
    does a good job extracting text and a better job adding Markdown formatting than most other libraries.
@@ -163,7 +268,7 @@ Otherwise, we convert files to Markdown using one of the following methods (in o
    fast and cheap, but it's also the least accurate.
 
 JSON conversion
-^^^^^^^^^^^^^^^
+"""""""""""""""
 
 You can convert from Markdown to JSON using the ``DocumentInterface.markdown_to_json()`` method, or you can convert
 files directly to JSON using the ``DocumentInterface.convert_to_json()`` method. The latter method will most often
@@ -175,9 +280,9 @@ convert to Markdown first and then to JSON, but it will convert straight to JSON
    the ``markdown_first`` parameter is not explicitly provided as ``True``, and the file's content doesn't look too
    large to fit in the LLM context window (<= 50 pages or 25,000 tokens).
 
-The advantage of converting to JSON directly, bypassing the Markdown step, is that you can handle files of arbitrary
-size. However, the page-by-page approach can work poorly for elements that span pages (since JSON conversion happens
-page-by-page).
+The advantage of converting to JSON directly can also be a disadvantage: parsing to JSON is done page-by-page. If
+structural elements don't span page boundaries, this can be great; however, if elements *do* span page boundaries, then
+it will make things worse.
 
 Whether or not you convert to JSON via Markdown, JSON conversion always uses LLM assistance. The parameters you supply
 are:
@@ -200,11 +305,21 @@ Known issues
 
 #. The example Google Colab notebooks pop up a message during installation that offers to restart the runtime. You have
    to click cancel so as not to interrupt execution.
-#. OpenAI can randomly refuse some requests to process PDF pages and currently there's no auto-retry, so it can
-   interrupt PDF processing at inconvenient times. Azure's OpenAI implementation seems to be more robust, particularly
-   if you relax the content filtering.
-#. LangSmith tracing support is not as good for Anthropic as it is for OpenAI. Specifically: attached images don't show
-   in traces and, while token usage does appear in the metadata, the UI doesn't show token usage nicely.
+
+#. The automatic generation and caching of JSON schemas (for response validation) can work poorly when batches of
+   similar requests are all launched in parallel (as each request will generate and cache the schema).
+
+#. LangSmith tracing support is imperfect in a few ways:
+
+   a. For OpenAI models, the top-level token usage counts are roughly doubled. You have to look to the inner LLM call
+      for an accurate count of input and output tokens.
+   b. For Anthropic models, the token usage doesn't show up at all, but you can find it by clicking into the metadata
+      for the inner LLM call.
+   c. For Anthropic models, the system prompt is only visible if you click into the inner LLM call and then switch the
+      *Input* display to *Raw input*.
+   d. For Anthropic models, images in prompts don't show properly.
+
+#. The support for conversation history in ``LLMInterface`` can overflow the context window in long conversations.
 
 Roadmap
 -------
@@ -212,18 +327,21 @@ Roadmap
 There's much that can be improved here. For example:
 
 * For what's already here:
-    * Unit testing
+    * Adding unit tests
     * Tracking and reporting LLM costs
     * Improving evaluation and comparison methods
-    * Adding automatic retries for LLM refusals
-    * Parallelizing LLM calls for faster processing
 * Supporting more file formats and conversion methods:
     * Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
 * Expanding capabilities:
+    * Adding support for logging workflow steps and results
+    * Adding async versions of the ``DocumentInterface`` methods
     * Adding support for more LLMs
+    * Adding support for a higher-level workflow-step concept that simplifies use of the ``LLMInterface`` and
+      ``DocumentInterface`` classes
     * Adding basic RAG support
     * Expanding RAG support for knowledge graphs
     * Adding some kind of Docker support to extend the RAG/KG implementations to, e.g., ChatGPT via ChatGPT Actions
+    * Adding automatic summarization of conversation histories to stay within a fixed token budget
 
 Credits
 -------
