@@ -13,10 +13,10 @@ jsonschema
 beautifulsoup4>=4.12.0
 markdown>=3.5.0
 colab-or-not~=0.4.0
+json_repair==0.*
+docling==2.*
 # dev environment
 setuptools~=70.0.0
 twine>=5.0,<6.0
 sphinx>=8.0,<9.0
 sphinx-rtd-theme>=3.0,<4.0
-json_repair==0.*
-docling==2.*

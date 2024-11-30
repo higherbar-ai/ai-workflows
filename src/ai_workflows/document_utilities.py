@@ -14,7 +14,7 @@
 
 """Utilities for reading and processing documents for AI workflows."""
 
-from ai_workflows.llm_utilities import LLMInterface
+from ai_workflows.llm_utilities import LLMInterface, JSONSchemaCache
 import fitz  # (PyMuPDF)
 from fitz.utils import get_pixmap
 import pymupdf4llm
@@ -38,12 +38,12 @@ from pathlib import Path
 import re
 import tempfile
 import logging
-import tiktoken
-import hashlib
 import markdown as mdpackage
 from bs4 import BeautifulSoup
 from docling.document_converter import DocumentConverter
 from docling.datamodel.base_models import FormatToExtensions
+from functools import reduce
+import concurrent.futures
 
 
 class DocumentInterface:
@@ -62,13 +62,15 @@ class DocumentInterface:
     max_xlsx_via_pdf_pages: int = 10
     max_json_via_markdown_pages = 50
     max_json_via_markdown_tokens = 25000
+    max_json_via_markdown_chunk_tokens = None
+    max_parallel_requests = 5
 
     llm_interface: LLMInterface = None
     pdf_image_dpi: int = 150
     pdf_image_max_bytes = 1024 * 1024 * 4  # 4MB
 
     def __init__(self, llm_interface: LLMInterface = None, pdf_image_dpi: int = 150,
-                 pdf_image_max_bytes: int = 1024 * 1024 * 4):
+                 pdf_image_max_bytes: int = 1024 * 1024 * 4, max_parallel_requests: int = 5):
         """
         Initialize the document interface for reading and processing documents.
 
@@ -80,15 +82,22 @@ class DocumentInterface:
         :type pdf_image_dpi: int
         :param pdf_image_max_bytes: Maximum size in bytes for an image to be processed. Default is 4MB.
         :type pdf_image_max_bytes: int
+        :param max_parallel_requests: Maximum number of parallel requests to make when accessing LLM. Default is 5.
+        :type max_parallel_requests: int
         """
 
         # if specified, remember our LLM interface
         if llm_interface:
             self.llm_interface = llm_interface
 
-        # remember image settings
+            # also set max chunk size for Markdown processing to 75% of the LLM's max output tokens (leaving overhead
+            # for JSON and other output formatting)
+            self.max_json_via_markdown_chunk_tokens = int(self.llm_interface.max_tokens * 0.75)
+
+        # remember other settings
         self.pdf_image_dpi = pdf_image_dpi
         self.pdf_image_max_bytes = pdf_image_max_bytes
+        self.max_parallel_requests = max_parallel_requests
 
     def convert_to_markdown(self, filepath: str, use_text: bool = False) -> str:
         """
@@ -162,8 +171,7 @@ class DocumentInterface:
                         markdown_first = False
                 else:
                     # use tokens to decide
-                    encoding = tiktoken.encoding_for_model(self.llm_interface.model)
-                    if len(encoding.encode(markdown)) <= DocumentInterface.max_json_via_markdown_tokens:
+                    if self.llm_interface.count_tokens(markdown) <= DocumentInterface.max_json_via_markdown_tokens:
                         # if we're within the limit, use Markdown conversion first
                         markdown_first = True
                     else:
@@ -225,111 +233,123 @@ class DocumentInterface:
         # extract file extension
         ext = os.path.splitext(filepath)[1].lower()
 
-        # if we have an LLM interface, use it when we can
-        if self.llm_interface is not None:
-            # always convert PDFs with the LLM
-            if ext == '.pdf':
-                # convert PDF using LLM
-                pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface, pdf_image_dpi=self.pdf_image_dpi,
-                                                     pdf_image_max_bytes=self.pdf_image_max_bytes)
-                if to_format == "md":
-                    # convert to Markdown
-                    return pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
-                elif to_format == "json":
-                    # convert directly to JSON
-                    return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec,
-                                                     json_output_schema, use_text=use_text)
-                else:
-                    # convert to Markdown and then to JSON
-                    markdown = pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
-                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
-
-            # convert certain other file types to PDF to then convert with the LLM
-            if ext in DocumentInterface.via_pdf_file_extensions:
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    # convert to PDF in temporary directory
-                    pdf_path = self.convert_to_pdf(filepath, temp_dir)
+        if ext == '.md':
+            # if the input file is already Markdown, read it as-is
+            with open(filepath, 'r', encoding='utf-8') as file:
+                markdown = file.read()
+        else:
+            # otherwise, if we have an LLM interface, use it when we can
+            if self.llm_interface is not None:
+                # always convert PDFs with the LLM
+                if ext == '.pdf':
                     # convert PDF using LLM
                     pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
                                                          pdf_image_dpi=self.pdf_image_dpi,
-                                                         pdf_image_max_bytes=self.pdf_image_max_bytes)
+                                                         pdf_image_max_bytes=self.pdf_image_max_bytes,
+                                                         max_parallel_requests=self.max_parallel_requests)
                     if to_format == "md":
                         # convert to Markdown
-                        return pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                        return pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
                     elif to_format == "json":
                         # convert directly to JSON
-                        return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec,
+                        return pdf_converter.pdf_to_json(filepath, json_context, json_job, json_output_spec,
                                                          json_output_schema, use_text=use_text)
                     else:
                         # convert to Markdown and then to JSON
-                        markdown = pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                        markdown = pdf_converter.pdf_to_markdown(filepath, use_text=use_text)
                         return self.markdown_to_json(markdown, json_context, json_job, json_output_spec,
                                                      json_output_schema)
 
-        # if Excel, see if we can convert to Markdown using our custom converter
-        if ext == '.xlsx':
-            # convert Excel to Markdown using custom converter
-            # (try to keep images and charts if we have an LLM available and we're after Markdown output)
-            result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
-                                (filepath, lose_unsupported_content=(not (self.llm_interface and to_format == "md"))))
-            if result:
-                if to_format == "json":
-                    # if we're after JSON, convert the Markdown to JSON using the LLM
-                    return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
-                else:
-                    # otherwise, just return the Markdown
-                    return markdown
-            else:
-                # log reason from returned Markdown
-                logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
-
-                # if we have an LLM and we're after Markdown, PDF it and then convert with LLM if we can
-                # (we don't want to use an LLM on Excel files headed for JSON)
-                if self.llm_interface is not None and to_format == "md":
-                    with (tempfile.TemporaryDirectory() as temp_dir):
+                # convert certain other file types to PDF to then convert with the LLM
+                if ext in DocumentInterface.via_pdf_file_extensions:
+                    with tempfile.TemporaryDirectory() as temp_dir:
                         # convert to PDF in temporary directory
                         pdf_path = self.convert_to_pdf(filepath, temp_dir)
-
-                        # check number of PDF pages and only move forward with LLM conversion if it's within the limit
-                        doc = fitz.open(pdf_path)
-                        if len(doc) <= DocumentInterface.max_xlsx_via_pdf_pages:
-                            # convert PDF to Markdown using LLM
-                            pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
-                                                                 pdf_image_dpi=self.pdf_image_dpi,
-                                                                 pdf_image_max_bytes=self.pdf_image_max_bytes)
+                        # convert PDF using LLM
+                        pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
+                                                             pdf_image_dpi=self.pdf_image_dpi,
+                                                             pdf_image_max_bytes=self.pdf_image_max_bytes,
+                                                             max_parallel_requests=self.max_parallel_requests)
+                        if to_format == "md":
+                            # convert to Markdown
                             return pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                        elif to_format == "json":
+                            # convert directly to JSON
+                            return pdf_converter.pdf_to_json(pdf_path, json_context, json_job, json_output_spec,
+                                                             json_output_schema, use_text=use_text)
                         else:
-                            logging.info(f"{filepath} converted to {len(doc)} pages, which is over the limit "
-                                         f"({DocumentInterface.max_xlsx_via_pdf_pages}); converting without images or "
-                                         f"charts...")
-                            result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
-                                                (filepath, lose_unsupported_content=True))
-                            if result:
-                                return markdown
-                            else:
-                                # log reason from returned Markdown
-                                # then fall through to let Unstructured have a try at it
-                                logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
+                            # convert to Markdown and then to JSON
+                            markdown = pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                            return self.markdown_to_json(markdown, json_context, json_job, json_output_spec,
+                                                         json_output_schema)
 
-        # otherwise, fall back to converting using Docling, PyMuPDF4LLM, or Unstructured (in that preference order)
-        markdown = ""
-        if ext in DocumentInterface.docling_file_extensions:
-            # try to convert using Docling
-            try:
-                doc_converter = DocumentConverter()
-                markdown = doc_converter.convert(filepath).document.export_to_markdown()
-            except Exception as e:
-                logging.warning(f"Error converting {filepath} using Docling: {e}")
-        if not markdown and ext in DocumentInterface.pymupdf_file_extensions:
-            # try to convert using PyMuPDF4LLM
-            try:
-                markdown = pymupdf4llm.to_markdown(filepath)
-            except Exception as e:
-                logging.warning(f"Error converting {filepath} using PyMuPDF4LLM: {e}")
-        if not markdown:
-            # otherwise, use Unstructured to convert
-            doc_converter = UnstructuredDocumentConverter()
-            markdown = doc_converter.convert_to_markdown(filepath)
+            # if Excel, see if we can convert to Markdown using our custom converter
+            if ext == '.xlsx':
+                # convert Excel to Markdown using custom converter
+                # (try to keep images and charts if we have an LLM available and we're after Markdown output)
+                result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
+                                    (filepath,
+                                     lose_unsupported_content=(not (self.llm_interface and to_format == "md"))))
+                if result:
+                    if to_format == "json":
+                        # if we're after JSON, convert the Markdown to JSON using the LLM
+                        return self.markdown_to_json(markdown, json_context, json_job, json_output_spec,
+                                                     json_output_schema)
+                    else:
+                        # otherwise, just return the Markdown
+                        return markdown
+                else:
+                    # log reason from returned Markdown
+                    logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
+
+                    # if we have an LLM and we're after Markdown, PDF it and then convert with LLM if we can
+                    # (we don't want to use an LLM on Excel files headed for JSON)
+                    if self.llm_interface is not None and to_format == "md":
+                        with (tempfile.TemporaryDirectory() as temp_dir):
+                            # convert to PDF in temporary directory
+                            pdf_path = self.convert_to_pdf(filepath, temp_dir)
+
+                            # check number of PDF pages and only move forward with LLM conversion if within the limit
+                            doc = fitz.open(pdf_path)
+                            if len(doc) <= DocumentInterface.max_xlsx_via_pdf_pages:
+                                # convert PDF to Markdown using LLM
+                                pdf_converter = PDFDocumentConverter(llm_interface=self.llm_interface,
+                                                                     pdf_image_dpi=self.pdf_image_dpi,
+                                                                     pdf_image_max_bytes=self.pdf_image_max_bytes,
+                                                                     max_parallel_requests=self.max_parallel_requests)
+                                return pdf_converter.pdf_to_markdown(pdf_path, use_text=use_text)
+                            else:
+                                logging.info(f"{filepath} converted to {len(doc)} pages, which is over the limit "
+                                             f"({DocumentInterface.max_xlsx_via_pdf_pages}); converting without images "
+                                             f"or charts...")
+                                result, markdown = (ExcelDocumentConverter.convert_excel_to_markdown
+                                                    (filepath, lose_unsupported_content=True))
+                                if result:
+                                    return markdown
+                                else:
+                                    # log reason from returned Markdown
+                                    # then fall through to let Unstructured have a try at it
+                                    logging.info(f"Failed to convert {filepath} to Markdown: {markdown}")
+
+            # otherwise, fall back to converting using Docling, PyMuPDF4LLM, or Unstructured (in that preference order)
+            markdown = ""
+            if ext in DocumentInterface.docling_file_extensions:
+                # try to convert using Docling
+                try:
+                    doc_converter = DocumentConverter()
+                    markdown = doc_converter.convert(filepath).document.export_to_markdown()
+                except Exception as e:
+                    logging.warning(f"Error converting {filepath} using Docling: {e}")
+            if not markdown and ext in DocumentInterface.pymupdf_file_extensions:
+                # try to convert using PyMuPDF4LLM
+                try:
+                    markdown = pymupdf4llm.to_markdown(filepath)
+                except Exception as e:
+                    logging.warning(f"Error converting {filepath} using PyMuPDF4LLM: {e}")
+            if not markdown:
+                # otherwise, use Unstructured to convert
+                doc_converter = UnstructuredDocumentConverter()
+                markdown = doc_converter.convert_to_markdown(filepath)
 
         if to_format in ["json", "mdjson"]:
             # if we're after JSON, convert the Markdown to JSON using the LLM
@@ -367,9 +387,11 @@ class DocumentInterface:
         return os.path.join(output_dir, os.path.splitext(os.path.basename(filepath))[0] + '.pdf')
 
     def markdown_to_json(self, markdown: str, json_context: str, json_job: str, json_output_spec: str,
-                         json_output_schema: str | None = "") -> list[dict]:
+                         json_output_schema: str | None = "", max_chunk_size: int = 0,
+                         min_chunk_size: int = 2000) -> list[dict]:
         """
-        Convert Markdown text to JSON using an LLM.
+        Convert Markdown text to JSON using an LLM. If needed, will automatically split text into chunks and process
+        each separately. Returns a list of dicts with JSON results, one for each chunk.
 
         :param markdown: Markdown text to convert to JSON.
         :type markdown: str
@@ -386,8 +408,13 @@ class DocumentInterface:
         :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
           schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
         :type json_output_schema: str
-        :return: List of dicts with JSON results (could be all results in one dict, could be split into multiple because
-          of page-by-page or other batched processing).
+        :param max_chunk_size: Maximum number of tokens allowed per chunk of Markdown processed. Default is 0, which
+            will use a default based on the LLM's maximum output tokens.
+        :type max_chunk_size: int
+        :param min_chunk_size: Minimum number of desired tokens in a chunk of Markdown processed. Default is 2000.
+            Set to -1 to disable.
+        :type min_chunk_size: int
+        :return: List of dicts with JSON results, one for each chunk.
         :rtype: list[dict]
         """
 
@@ -395,20 +422,9 @@ class DocumentInterface:
         if self.llm_interface is None:
             raise ValueError("LLM interface required for JSON conversion")
 
-        # set up for JSON processing
-        json_prompt = f"""Consider the Markdown text below, which has been extracted from a file.
-
-{json_context}
-
-{json_job}
-
-{json_output_spec}
-
-Markdown text enclosed by |@| delimiters:
-
-|@|{markdown}|@|
-
-Your JSON response precisely following the instructions given above the Markdown text:"""
+        # default max_chunk_size if not specified
+        if not max_chunk_size:
+            max_chunk_size = self.max_json_via_markdown_chunk_tokens
 
         # handle automatic schema generation, with cache
         if json_output_schema is None:
@@ -423,20 +439,51 @@ Your JSON response precisely following the instructions given above the Markdown
                 json_output_schema = self.llm_interface.generate_json_schema(json_output_spec)
                 JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
 
-        # for now, process all in one go (assumes it all fits in the LLM context window)
-        response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(
-            prompt=json_prompt, json_validation_schema=json_output_schema)
+        # handle processing of Markdown chunks in batches
+        def process_chunks_in_batches(chunks, max_parallel_requests):
+            results = []
 
-        # raise exception on error
-        if error:
-            logging.error(f"ERROR: Error extracting JSON from Markdown: {error}")
-            raise RuntimeError(f"Error extracting JSON from Markdown: {error}")
+            def process_chunk(chunk):
+                json_prompt = f"""Consider the Markdown text below, which has been extracted from a file.
 
-        # log all returned elements
-        logging.info(f"Extracted JSON from Markdown: {json.dumps(response_dict, indent=2)}")
+{json_context}
+
+{json_job}
+
+{json_output_spec}
+
+Markdown text enclosed by |@| delimiters:
+
+|@|{chunk}|@|
+
+Your JSON response precisely following the instructions given above the Markdown text:"""
+
+                response_dict, response_text, error = self.llm_interface.get_json_response(
+                    prompt=json_prompt, json_validation_schema=json_output_schema)
+
+                if error:
+                    logging.error(f"Error extracting JSON from Markdown: {error}")
+                    raise RuntimeError(f"Error extracting JSON from Markdown: {error}")
+
+                logging.info(f"Extracted JSON from Markdown: {json.dumps(response_dict, indent=2)}")
+                return response_dict
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_requests) as executor:
+                future_to_chunk = {executor.submit(process_chunk, chunk): i for i, chunk in enumerate(chunks)}
+                for future in concurrent.futures.as_completed(future_to_chunk):
+                    index = future_to_chunk[future]
+                    result = future.result()
+                    results.append((index, result))
+
+            results.sort(key=lambda x: x[0])
+            return [result for _, result in results]
+
+        # split into chunks as needed, then process the chunks in batches
+        markdown_chunks = self.split_markdown(markdown, max_tokens=max_chunk_size, min_tokens=min_chunk_size)
+        result_list = process_chunks_in_batches(markdown_chunks, self.max_parallel_requests)
 
         # return results
-        return [response_dict]
+        return result_list
 
     @staticmethod
     def markdown_to_text(markdown: str) -> str:
@@ -461,6 +508,82 @@ Your JSON response precisely following the instructions given above the Markdown
 
         return text
 
+    def split_markdown(self, text: str, max_tokens: int, min_tokens: int = 2000) -> List[str]:
+        """
+        Split Markdown text into chunks based on token count and document structure.
+
+        This function provides a convenient interface to the MarkdownSplitter class, creating chunks that respect both
+        markdown structure and token limits.
+
+        :param text: The Markdown text to split
+        :type text: str
+        :param max_tokens: Maximum number of tokens allowed per chunk
+        :type max_tokens: int
+        :param min_tokens: Minimum number of desired tokens in a chunk. Default is 2000. Set to -1 to disable.
+        :type min_tokens: int
+        :return: List of text chunks, each within the token limit
+        :rtype: List[str]
+        """
+
+        splitter = MarkdownSplitter(self.llm_interface.count_tokens, max_tokens=max_tokens, min_tokens=min_tokens)
+        return splitter.split_text(text)
+
+    @staticmethod
+    def merge_dicts(dict_list: list[dict], strategy: str = 'retain') -> dict:
+        """
+        Merge a list of dictionaries into a single dictionary.
+
+        :param dict_list: List of dictionaries to merge.
+        :type dict_list: list[dict]
+        :param strategy: Strategy for handling non-list duplicate items.
+                         'retain' (default): retain the original value.
+                         'overwrite': overwrite with the last value.
+                         'collect': collect values into a list.
+        :type strategy: str
+        :return: A single merged dictionary.
+        :rtype: dict
+        """
+
+        def merge(a, b):
+            result = {}
+            for key in set(a.keys()).union(b.keys()):
+                val_a = a.get(key)
+                val_b = b.get(key)
+
+                if key in a and key in b:
+                    # both dictionaries have the key
+                    if isinstance(val_a, dict) and isinstance(val_b, dict):
+                        # recursively merge dictionaries
+                        result[key] = merge(val_a, val_b)
+                    elif isinstance(val_a, list) and isinstance(val_b, list):
+                        # extend lists
+                        result[key] = val_a + val_b
+                    elif isinstance(val_a, list):
+                        # append non-list to list
+                        result[key] = val_a + [val_b]
+                    elif isinstance(val_b, list):
+                        # prepend non-list to list
+                        result[key] = [val_a] + val_b
+                    else:
+                        if strategy == 'overwrite':
+                            # overwrite with the last value
+                            result[key] = val_b
+                        elif strategy == 'collect':
+                            # collect both values into a list
+                            result[key] = [val_a, val_b]
+                        elif strategy == 'retain':
+                            # retain the original value
+                            result[key] = val_a
+                        else:
+                            raise ValueError(f"Unknown strategy: {strategy}")
+                elif key in a:
+                    result[key] = val_a
+                else:
+                    result[key] = val_b
+            return result
+
+        return reduce(merge, dict_list)
+
 
 class PDFDocumentConverter:
     """Utility class for converting PDF files to Markdown."""
@@ -468,10 +591,11 @@ class PDFDocumentConverter:
     # member variables
     llm_interface: LLMInterface = None
     pdf_image_dpi: int = 150
-    pdf_image_max_bytes = 1024 * 1024 * 4  # 4MB
+    pdf_image_max_bytes: int = 1024 * 1024 * 4  # 4MB
+    max_parallel_requests: int = 5
 
     def __init__(self, llm_interface: LLMInterface = None, pdf_image_dpi: int = 150,
-                 pdf_image_max_bytes: int = 1024 * 1024 * 4):
+                 pdf_image_max_bytes: int = 1024 * 1024 * 4, max_parallel_requests: int = 5):
         """
         Initialize for converting PDF files.
 
@@ -483,15 +607,18 @@ class PDFDocumentConverter:
         :type pdf_image_dpi: int
         :param pdf_image_max_bytes: Maximum size in bytes for an image to be processed. Default is 4MB.
         :type pdf_image_max_bytes: int
+        :param max_parallel_requests: Maximum number of parallel requests to make when accessing LLM. Default is 5.
+        :type max_parallel_requests: int
         """
 
         # if specified, remember our LLM interface
         if llm_interface:
             self.llm_interface = llm_interface
 
-        # remember image settings
+        # remember other settings
         self.pdf_image_dpi = pdf_image_dpi
         self.pdf_image_max_bytes = pdf_image_max_bytes
+        self.max_parallel_requests = max_parallel_requests
 
     @staticmethod
     def pdf_to_images(pdf_path: str, dpi: int = 150) -> list[Image.Image]:
@@ -801,17 +928,6 @@ class PDFDocumentConverter:
         # convert PDF to images
         images_and_text = PDFDocumentConverter.pdf_to_images_and_text(pdf_path=pdf_path, dpi=self.pdf_image_dpi)
 
-        # set up for image processing (default case where we're not using text)
-        image_prompt = f"""Consider the attached image, which shows a single page from a PDF file.
-
-{json_context}
-
-{json_job}
-
-{json_output_spec}
-
-Your JSON response precisely following the instructions above:"""
-
         # handle automatic schema generation, with cache
         if json_output_schema is None:
             # explicitly skip schema validation
@@ -825,16 +941,71 @@ Your JSON response precisely following the instructions above:"""
                 json_output_schema = self.llm_interface.generate_json_schema(json_output_spec)
                 JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
 
-        # process each page
-        all_dicts = []
-        logging.log(logging.INFO, f"Processing PDF {pdf_path} from {len(images_and_text)} images")
-        for i, (img, txt) in enumerate(images_and_text):
+        # function to process a single page
+        def process_page(i, img, txt):
             logging.log(logging.INFO, f"Processing PDF page {i + 1}: Size={img.size}, Mode={img.mode}")
 
-            # construct the prompt with the image
-            if use_text and txt:
-                # override image prompt to add text
-                image_prompt = f"""Consider the attached image, which shows a single page from a PDF file.
+            # assemble prompt
+            prompt_with_image = self._image_prompt(img, json_context, json_job, json_output_spec,
+                                                   txt if txt and use_text else "")
+
+            # call out to the LLM and process the returned JSON
+            response_dict, response_text, error = self.llm_interface.get_json_response(
+                prompt=prompt_with_image, json_validation_schema=json_output_schema)
+
+            # raise exception on error
+            if error:
+                logging.error(f"ERROR: Error extracting JSON from page {i + 1}: {error}")
+                raise RuntimeError(f"Error extracting JSON from page {i + 1} of {pdf_path}: {error}")
+
+            # log all returned elements
+            logging.info(f"Extracted JSON for page {i + 1}: {json.dumps(response_dict, indent=2)}")
+
+            return response_dict
+
+        # process pages in batches
+        def process_batches(images_n_text, max_parallel_requests):
+            results = []
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_requests) as executor:
+                future_to_page = {executor.submit(process_page, i, img, txt): i for i, (img, txt) in
+                                  enumerate(images_n_text)}
+                for future in concurrent.futures.as_completed(future_to_page):
+                    index = future_to_page[future]
+                    result = future.result()
+                    results.append((index, result))
+
+            results.sort(key=lambda x: x[0])
+            return [result for _, result in results]
+
+        # process all pages in batches
+        logging.log(logging.INFO, f"Processing PDF {pdf_path} from {len(images_and_text)} images")
+        all_dicts = process_batches(images_and_text, self.max_parallel_requests)
+
+        # return all results
+        return all_dicts
+
+    def _image_prompt(self, image: Image.Image, json_context: str, json_job: str, json_output_spec: str,
+                      txt: str = "") -> list[dict]:
+        """
+        Construct an LLM prompt for processing an image.
+
+        :param image: Image to process.
+        :type image: Image.Image
+        :param json_context: Context for the LLM prompt.
+        :type json_context: str
+        :param json_job: Job to do for the LLM prompt.
+        :type json_job: str
+        :param json_output_spec: Output format for the LLM prompt.
+        :type json_output_spec: str
+        :param txt: Text to include (optional, as extracted from the image).
+        :type txt: str
+        :return: LLM prompt for processing the image.
+        :rtype: list[dict]
+        """
+
+        if txt:
+            image_prompt = f"""Consider the attached image, which shows a single page from a PDF file.
 
 Here is plain text we have extracted from the image, in case it's helpful (delimited by #|# delimiters), but always use the image to guide your response:
 
@@ -847,29 +1018,20 @@ Here is plain text we have extracted from the image, in case it's helpful (delim
 {json_output_spec}
 
 Your JSON response precisely following the instructions above:"""
+        else:
+            image_prompt = f"""Consider the attached image, which shows a single page from a PDF file.
 
-            # assemble prompt
-            prompt_with_image = [self.llm_interface.user_message_with_image(
-                user_message=image_prompt, image=img, max_bytes=self.pdf_image_max_bytes,
+{json_context}
+
+{json_job}
+
+{json_output_spec}
+
+Your JSON response precisely following the instructions above:"""
+
+        return [self.llm_interface.user_message_with_image(
+                user_message=image_prompt, image=image, max_bytes=self.pdf_image_max_bytes,
                 current_dpi=self.pdf_image_dpi)]
-
-            # call out to the LLM and process the returned JSON
-            response_dict, response_text, error = self.llm_interface.llm_json_response_with_timeout(
-                prompt=prompt_with_image, json_validation_schema=json_output_schema)
-
-            # raise exception on error
-            if error:
-                logging.error(f"ERROR: Error extracting JSON from page {i+1}: {error}")
-                raise RuntimeError(f"Error extracting JSON from page {i+1} of {pdf_path}: {error}")
-
-            # otherwise, add response to running list of parsed results
-            all_dicts.append(response_dict)
-
-            # log all returned elements
-            logging.info(f"Extracted JSON for page {i + 1}: {json.dumps(response_dict, indent=2)}")
-
-        # return all results
-        return all_dicts
 
     def pdf_to_markdown(self, pdf_path: str, use_text: bool = False) -> str:
         """
@@ -1172,7 +1334,8 @@ class ExcelDocumentConverter:
                     # empty row - close current table if it exists
                     if current_table is not None:
                         # check if it overlaps with any existing tables
-                        if not any(ExcelDocumentConverter.ExcelContent._ranges_overlap(current_table, t) for t in tables):
+                        if not any(ExcelDocumentConverter.ExcelContent._ranges_overlap(current_table, t)
+                                   for t in tables):
                             tables.append(current_table)
                         current_table = None
 
@@ -1495,8 +1658,8 @@ class ExcelDocumentConverter:
                                 row_values.append('')
                         else:
                             value = cell.value
-                            formatted_value = ExcelDocumentConverter._format_cell_value(cell,
-                                                                                        value) if value is not None else ''
+                            formatted_value = ExcelDocumentConverter._format_cell_value(cell, value) \
+                                if value is not None else ''
                             row_values.append(formatted_value)
                     rows.append(row_values)
 
@@ -1537,7 +1700,8 @@ class ExcelDocumentConverter:
                         row_values.append('')
                 else:
                     value = cell.value
-                    formatted_value = ExcelDocumentConverter._format_cell_value(cell, value) if value is not None else ''
+                    formatted_value = ExcelDocumentConverter._format_cell_value(cell, value) if value is not None \
+                        else ''
                     row_values.append(formatted_value)
 
             # only add rows that aren't completely empty
@@ -2057,48 +2221,219 @@ class UnstructuredDocumentConverter:
         return "\n".join(markdown_parts)
 
 
-class JSONSchemaCache:
-    """Cache for JSON schemas."""
+class MarkdownSplitter:
+    """Split Markdown text into chunks while preserving document structure."""
 
-    # shared class-level member for schema cache
-    schema_cache: Dict[str, str] = {}
+    def __init__(self, count_tokens: Callable[[str], int], max_tokens: int, min_tokens: int = 2000):
+        """
+        Initialize the Markdown splitter with token counting function and maximum tokens.
+
+        This class splits Markdown text into chunks while preserving the document structure and ensuring each chunk
+        stays within a specified token limit.
+
+        :param count_tokens: Function that takes a string and returns its token count
+        :type count_tokens: Callable[[str], int]
+        :param max_tokens: Maximum number of tokens allowed per chunk
+        :type max_tokens: int
+        :param min_tokens: Minimum number of tokens desired per chunk. Defaults to 2000. Set to -1 to disable.
+        :type min_tokens: int
+        """
+
+        self.count_tokens = count_tokens
+        self.max_tokens = max_tokens
+        self.min_tokens = min_tokens
+
+    def split_text(self, text: str) -> List[str]:
+        """
+        Split Markdown text recursively according to heading hierarchy and structure.
+
+        This function splits text using a hierarchical approach, starting with highest level headers and progressively
+        moving to finer-grained splits until all chunks are within the token limit.
+
+        :param text: The Markdown text to split
+        :type text: str
+        :return: List of text chunks, each within the token limit
+        :rtype: List[str]
+        """
+
+        # start with one big chunk and return it right away if it's within the limit
+        chunks = [text]
+        if self.count_tokens(text) <= self.max_tokens:
+            return [text]
+
+        # rank order our splitting strategies
+        splitting_strategies = [
+            self._split_by_pattern(r'^# '),  # h1
+            self._split_by_pattern(r'^## '),  # h2
+            self._split_by_pattern(r'^### '),  # h3
+            self._split_by_pattern(r'^#### '),  # h4
+            self._split_by_pattern(r'^##### '),  # h5
+            self._split_by_pattern(r'^\*\*[^*]+\*\*$'),  # bold headers
+            self._split_by_pattern(r'^(?:\*\*\*|---)$'),  # horizontal rules
+            self._split_by_paragraphs,  # paragraphs
+            self._split_by_lines,  # lines
+            self._split_by_tokens  # token-level split
+        ]
+
+        # apply each strategy one at a time, only to chunks that are over the limit
+        for strategy in splitting_strategies:
+            new_chunks = []
+            for chunk in chunks:
+                if self.count_tokens(chunk) <= self.max_tokens:
+                    new_chunks.append(chunk)
+                else:
+                    new_chunks.extend(strategy(chunk))
+            chunks = new_chunks
+
+            # break out of the loop once everybody is within the limit
+            if all(self.count_tokens(chunk) <= self.max_tokens for chunk in chunks):
+                break
+
+        # now run back through and merge adjacent chunks when they're too small and merging won't put a chunk over the
+        # limit
+        merged_chunks = []
+        prior_chunk_tokens = 0
+        prior_chunk_prefers_merge = False
+        for chunk in chunks:
+            chunk_tokens = self.count_tokens(chunk)
+            # if prior chunk was hoping to merge, merge if possible
+            if prior_chunk_prefers_merge and prior_chunk_tokens + chunk_tokens <= self.max_tokens:
+                merged_chunks[-1] += chunk
+                prior_chunk_tokens += chunk_tokens
+                # if we're still under the desired chunk size, keep trying to merge
+                prior_chunk_prefers_merge = (prior_chunk_tokens < self.min_tokens)
+            else:
+                # otherwise, see if we'd like to merge with somebody
+                if chunk_tokens < self.min_tokens:
+                    # merge with previous chunk if it won't put it over the limit
+                    if merged_chunks and prior_chunk_tokens + chunk_tokens <= self.max_tokens:
+                        merged_chunks[-1] += chunk
+                        prior_chunk_tokens += chunk_tokens
+                        prior_chunk_prefers_merge = False
+                    else:
+                        # add chunk, but flag that we'd like to merge with the next chunk if possible
+                        merged_chunks.append(chunk)
+                        prior_chunk_tokens = chunk_tokens
+                        prior_chunk_prefers_merge = True
+                else:
+                    # add chunk, with no explicit desire to merge with the next one
+                    merged_chunks.append(chunk)
+                    prior_chunk_tokens = chunk_tokens
+                    prior_chunk_prefers_merge = False
+        chunks = merged_chunks
+
+        return chunks
 
     @staticmethod
-    def get_json_schema(json_description: str) -> str:
+    def _split_by_pattern(pattern: str) -> Callable[[str], List[str]]:
         """
-        Retrieve cached schema from JSON description.
+        Create a function that splits text by a given regex pattern.
 
-        :param json_description: Description of the JSON format.
-        :type json_description: str
-        :return: JSON schema or empty string if not found.
-        :rtype: str
+        This function returns a splitting function that can be used to split text at specified Markdown patterns
+        like headers.
+
+        :param pattern: Regular expression pattern to split on
+        :type pattern: str
+        :return: Function that splits text using the provided pattern
+        :rtype: Callable[[str], List[str]]
         """
 
-        return JSONSchemaCache.schema_cache.get(JSONSchemaCache._get_description_hash(json_description), "")
+        def splitter(text: str) -> List[str]:
+            if not text.strip():
+                return []
+
+            return re.split(f'(?m)(?={pattern})', text)
+
+        return splitter
 
     @staticmethod
-    def put_json_schema(json_description: str, json_schema: str):
+    def _split_by_paragraphs(text: str) -> List[str]:
         """
-        Cache a JSON schema.
+        Split text by paragraphs (double newlines).
 
-        :param json_description: Description of the JSON format.
-        :type json_description: str
-        :param json_schema: JSON schema to cache.
-        :type json_schema: str
+        This function splits text at paragraph boundaries, identified by double newlines in the Markdown text.
+
+        :param text: Text to split
+        :type text: str
+        :return: List of paragraphs
+        :rtype: List[str]
         """
 
-        JSONSchemaCache.schema_cache[JSONSchemaCache._get_description_hash(json_description)] = json_schema
+        if not text.strip():
+            return []
+
+        return re.split(r'\n\s*\n', text)
 
     @staticmethod
-    def _get_description_hash(description: str) -> str:
+    def _split_by_lines(text: str) -> List[str]:
         """
-        Get a hash of the description for use as a cache key.
+        Split text by single newlines.
 
-        :param description: Description to hash.
-        :type description: str
-        :return: Hashed description.
-        :rtype: str
+        This function splits text into individual lines, used when paragraph-level splitting isn't sufficient.
+
+        :param text: Text to split
+        :type text: str
+        :return: List of lines
+        :rtype: List[str]
         """
 
-        normalized_description = ' '.join(description.split()).lower()
-        return hashlib.sha256(normalized_description.encode('utf-8')).hexdigest()
+        if not text.strip():
+            return []
+
+        return text.splitlines(keepends=True)
+
+    def _split_by_tokens(self, text: str) -> List[str]:
+        """
+        Split text at token boundaries as a final fallback.
+
+        This function performs the finest-grained splitting, breaking text into chunks of approximately max_tokens,
+        attempting to split at word boundaries when possible.
+
+        :param text: Text to split
+        :type text: str
+        :return: List of chunks, each within token limit
+        :rtype: List[str]
+        """
+
+        if self.count_tokens(text) <= self.max_tokens:
+            return [text]
+
+        chunks = []
+        current_chunk = ""
+        current_tokens = 0
+
+        words = text.split()
+
+        for word in words:
+            word_tokens = self.count_tokens(word)
+
+            if word_tokens > self.max_tokens:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = ""
+                    current_tokens = 0
+
+                remaining_word = word
+                while remaining_word:
+                    for i in range(len(remaining_word), 0, -1):
+                        substr = remaining_word[:i]
+                        if self.count_tokens(substr) <= self.max_tokens:
+                            chunks.append(substr)
+                            remaining_word = remaining_word[i:]
+                            break
+                continue
+
+            space_tokens = self.count_tokens(" ") if current_chunk else 0
+            if current_tokens + word_tokens + space_tokens <= self.max_tokens:
+                current_chunk += (" " if current_chunk else "") + word
+                current_tokens = self.count_tokens(current_chunk)
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = word
+                current_tokens = word_tokens
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks

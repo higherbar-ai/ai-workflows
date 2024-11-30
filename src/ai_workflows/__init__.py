@@ -12,8 +12,9 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-from .llm_utilities import LLMInterface
-from .document_utilities import DocumentInterface
+from .llm_utilities import LLMInterface, JSONSchemaCache
+from .document_utilities import (DocumentInterface, ExcelDocumentConverter, MarkdownSplitter, PDFDocumentConverter,
+                                 UnstructuredDocumentConverter)
 
 # report our current version, as installed
 from importlib.metadata import version

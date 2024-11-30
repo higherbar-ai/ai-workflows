@@ -13,12 +13,16 @@
 #  limitations under the License.
 
 """Utilities for interacting with LLMs in AI workflows."""
-
-from openai import OpenAI, AzureOpenAI
-from anthropic import Anthropic, AnthropicBedrock
+from anthropic.types import Message, RawMessageStreamEvent
+from openai import OpenAI, AsyncOpenAI, AzureOpenAI, AsyncAzureOpenAI, AsyncStream
+from openai import APITimeoutError, APIError, APIConnectionError, RateLimitError, InternalServerError
+from anthropic import Anthropic, AsyncAnthropic, AnthropicBedrock, AsyncAnthropicBedrock
+from anthropic import (APIConnectionError as AnthropicAPIConnectionError, RateLimitError as AnthropicRateLimitError,
+                       InternalServerError as AnthropicInternalServerError, AsyncStream as AnthropicAsyncStream)
 from langsmith import traceable, get_current_run_tree
 from langsmith.wrappers import wrap_openai
-import concurrent.futures
+
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 import json
 import os
@@ -28,6 +32,8 @@ from PIL import Image
 import io
 import base64
 import json_repair
+import tiktoken
+import hashlib
 
 
 class LLMInterface:
@@ -39,10 +45,14 @@ class LLMInterface:
     number_of_retries: int
     seconds_between_retries: int
     llm: OpenAI | AzureOpenAI | Anthropic | AnthropicBedrock | None
+    a_llm: AsyncOpenAI | AsyncAzureOpenAI | AsyncAnthropic | AsyncAnthropicBedrock | None
     model: str
     json_retries: int = 2
     max_tokens: int = 16384
     using_langsmith: bool = False
+    system_prompt = ""
+    maintain_history = False
+    conversation_history: list = []
 
     def __init__(self, openai_api_key: str = None, openai_model: str = None, temperature: float = 0.0,
                  total_response_timeout_seconds: int = 600, number_of_retries: int = 2,
@@ -51,7 +61,8 @@ class LLMInterface:
                  langsmith_project: str = 'ai_workflows', langsmith_endpoint: str = 'https://api.smith.langchain.com',
                  json_retries: int = 2, anthropic_api_key: str = None, anthropic_model: str = None,
                  bedrock_model: str = None, bedrock_region: str = "us-east-1", bedrock_aws_profile: str = None,
-                 max_tokens: int = None):
+                 max_tokens: int = None, system_prompt: str = "", maintain_history: bool = False,
+                 starting_chat_history: list[tuple] = None):
         """
         Initialize the LLM interface for LLM interactions.
 
@@ -100,6 +111,14 @@ class LLMInterface:
         :param max_tokens: Maximum tokens for LLM responses. Default is None, which auto-sets to 16384 for OpenAI and
             4096 for Anthropic.
         :type max_tokens: int
+        :param system_prompt: System prompt to add to all LLM calls. Default is "".
+        :type system_prompt: str
+        :param maintain_history: Whether to maintain a history of LLM interactions (and include the history in each call
+            to the LLM). Default is False.
+        :type maintain_history: bool
+        :param starting_chat_history: Starting chat history to use for the conversation chain (or None for none).
+            Should be tuples, each with a human and an AI message.
+        :type starting_chat_history: list[tuple]
         """
 
         # initialize LangSmith API (if key specified)
@@ -120,40 +139,62 @@ class LLMInterface:
             self.max_tokens = max_tokens
         else:
             self.max_tokens = 16384 if openai_api_key or azure_api_key else 4096
+        self.system_prompt = system_prompt
+        self.maintain_history = maintain_history
 
         # initialize LLM access
         if openai_api_key:
             self.llm = OpenAI(api_key=openai_api_key)
+            self.a_llm = AsyncOpenAI(api_key=openai_api_key)
             if self.using_langsmith:
                 # wrap OpenAI API with LangSmith for tracing
                 self.llm = wrap_openai(self.llm)
+                self.a_llm = wrap_openai(self.a_llm)
             self.model = openai_model
         elif azure_api_key:
             self.llm = AzureOpenAI(api_key=azure_api_key, azure_deployment=azure_api_engine,
                                    azure_endpoint=azure_api_base, api_version=azure_api_version)
+            self.a_llm = AsyncAzureOpenAI(api_key=azure_api_key, azure_deployment=azure_api_engine,
+                                          azure_endpoint=azure_api_base, api_version=azure_api_version)
             if self.using_langsmith:
                 # wrap AzureOpenAI API with LangSmith for tracing
                 self.llm = wrap_openai(self.llm, chat_name="ChatAzureOpenAI", completions_name="AzureOpenAI")
+                self.a_llm = wrap_openai(self.a_llm, chat_name="ChatAzureOpenAI", completions_name="AzureOpenAI")
             # the Azure deployment name is the model name for Azure
             self.model = azure_api_engine
         elif bedrock_model:
             if bedrock_aws_profile:
                 # if we have an AWS profile, use it to configure Bedrock
                 self.llm = AnthropicBedrock(aws_profile=bedrock_aws_profile, aws_region=bedrock_region)
+                self.a_llm = AsyncAnthropicBedrock(aws_profile=bedrock_aws_profile, aws_region=bedrock_region)
             else:
                 # otherwise, assume that credentials are in AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and
                 # AWS_SESSION_TOKEN environment variables, or otherwise pre-configured via the CLI
                 self.llm = AnthropicBedrock(aws_region=bedrock_region)
+                self.a_llm = AsyncAnthropicBedrock(aws_region=bedrock_region)
             self.model = bedrock_model
         elif anthropic_api_key:
             self.llm = Anthropic(api_key=anthropic_api_key)
+            self.a_llm = AsyncAnthropic(api_key=anthropic_api_key)
             self.model = anthropic_model
         else:
             raise ValueError("Must supply either OpenAI, Azure, Anthropic, or Bedrock parameters for LLM access.")
 
-    def llm_json_response(self, prompt: str | list, json_validation_schema: str = "") -> tuple[dict | None, str, str]:
+        # initialize chat history
+        if maintain_history:
+            self.conversation_history = []
+            if starting_chat_history is not None:
+                for (human_message, ai_message) in starting_chat_history:
+                    self.conversation_history += [
+                        self.user_message(human_message),
+                        self.ai_message(ai_message)
+                    ]
+
+    @traceable(run_type="prompt", name="ai_workflows.get_json_response")
+    def get_json_response(self, prompt: str | list, json_validation_schema: str = "",
+                          bypass_history_and_system_prompt=False) -> tuple[dict | None, str, str]:
         """
-        Call out to LLM for structured JSON response.
+        Call out to LLM for structured JSON response (synchronous version).
 
         This function sends a prompt to the LLM and returns the response in JSON format.
 
@@ -162,6 +203,8 @@ class LLMInterface:
         :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "", which
           means no validation.
         :type json_validation_schema: str
+        :param bypass_history_and_system_prompt: Whether to bypass the history and system prompt. Default is False.
+        :type bypass_history_and_system_prompt: bool
         :return: Tuple with parsed JSON response, raw LLM response, and error message (if any).
         :rtype: tuple(dict | None, str, str)
         """
@@ -169,7 +212,8 @@ class LLMInterface:
         # execute LLM evaluation, but catch and return any exceptions
         try:
             # invoke LLM and parse+validate JSON response
-            result = self.get_llm_response(prompt)
+            result = self.get_llm_response(prompt,
+                                           bypass_history_and_system_prompt=bypass_history_and_system_prompt)
             json_objects = self.extract_json(result)
             validation_error = self._json_validation_error(json_objects, json_validation_schema)
 
@@ -177,30 +221,39 @@ class LLMInterface:
                 # if there was a validation error, retry up to the allowed number of times
                 retries = 0
                 while retries < self.json_retries:
-                    if isinstance(prompt, str):
-                        # if the prompt was a string, convert to list for the retry
-                        retry_prompt = [self.user_message(prompt)]
-                    else:
-                        # otherwise, make copy of the prompt list for retry
-                        retry_prompt = prompt.copy()
-                    # add original response
-                    retry_prompt.append(self.ai_message(result))
-                    # add retry prompt, with or without a schema to guide the retry
+                    # draft our retry prompt
                     if json_validation_schema:
-                        retry_prompt.append(self.user_message(f"Your JSON response was invalid. Please correct it "
-                                                              f"and respond with valid JSON (with no code block "
-                                                              f"or other content). Just 100% valid JSON, according "
-                                                              f"to the instructions given. Your JSON response "
-                                                              f"should match the following schema:\n\n"
-                                                              f"{json_validation_schema}\n\nYour JSON response:"))
+                        retry_prompt_text = f"Your JSON response was invalid. Please correct it " \
+                                            f"and respond with valid JSON (with no code block " \
+                                            f"or other content). Just 100% valid JSON, according " \
+                                            f"to the instructions given. Your JSON response " \
+                                            f"should match the following schema:\n\n" \
+                                            f"{json_validation_schema}\n\nYour JSON response:"
                     else:
-                        retry_prompt.append(self.user_message(f"Your JSON response was invalid. Please correct it "
-                                                              f"and respond with valid JSON (with no code block "
-                                                              f"or other content). Just 100% valid JSON, according "
-                                                              f"to the instructions given:"))
+                        retry_prompt_text = "Your JSON response was invalid. Please correct it " \
+                                            "and respond with valid JSON (with no code block " \
+                                            "or other content). Just 100% valid JSON, according " \
+                                            "to the instructions given.\n\nYour JSON response:"
 
-                    # retry
-                    result = self.get_llm_response(retry_prompt)
+                    # if we're maintaining history already, can just use the text as the prompt
+                    if self.maintain_history and not bypass_history_and_system_prompt:
+                        retry_prompt = retry_prompt_text
+                    else:
+                        # otherwise, we need to manually add the relevant history, starting with the current prompt
+                        if isinstance(prompt, str):
+                            # if the prompt was a string, convert to list for the retry
+                            retry_prompt = [self.user_message(prompt)]
+                        else:
+                            # otherwise, make copy of the prompt list for retry
+                            retry_prompt = prompt.copy()
+                        # next add the original response
+                        retry_prompt.append(self.ai_message(result))
+                        # finally, add the retry prompt text
+                        retry_prompt.append(self.user_message(retry_prompt_text))
+
+                    # execute the retry
+                    result = self.get_llm_response(retry_prompt,
+                                                   bypass_history_and_system_prompt=bypass_history_and_system_prompt)
                     json_objects = self.extract_json(result)
                     validation_error = self._json_validation_error(json_objects, json_validation_schema)
                     retries += 1
@@ -219,53 +272,98 @@ class LLMInterface:
         # return result
         return json_objects[0] if not validation_error else None, result, validation_error
 
-    def llm_json_response_with_timeout(self, prompt: str | list, json_validation_schema: str = "") \
-            -> tuple[dict | None, str, str]:
+    @traceable(run_type="prompt", name="ai_workflows.a_get_json_response")
+    async def a_get_json_response(self, prompt: str | list,
+                                  json_validation_schema: str = "",
+                                  bypass_history_and_system_prompt=False) -> tuple[dict | None, str, str]:
         """
-        Call out to LLM for structured JSON response with timeout and retry.
+        Call out to LLM for structured JSON response (async version).
 
-        This function sends a prompt to the LLM and returns the response in JSON format, with support for timeout and
-        retry mechanisms.
+        This function sends a prompt to the LLM and returns the response in JSON format.
 
         :param prompt: Prompt to send to the LLM.
         :type prompt: str | list
         :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "", which
           means no validation.
         :type json_validation_schema: str
+        :param bypass_history_and_system_prompt: Whether to bypass the history and system prompt. Default is False.
+        :type bypass_history_and_system_prompt: bool
         :return: Tuple with parsed JSON response, raw LLM response, and error message (if any).
         :rtype: tuple(dict | None, str, str)
         """
 
-        # define the retry decorator inside the method (so that we can use instance variables)
-        retry_decorator = retry(
-            stop=stop_after_attempt(self.number_of_retries),
-            wait=wait_fixed(self.seconds_between_retries),
-            retry=retry_if_exception_type(concurrent.futures.TimeoutError),
-            reraise=True
-        )
+        # execute LLM evaluation, but catch and return any exceptions
+        try:
+            # invoke LLM and parse+validate JSON response
+            result = await self.a_get_llm_response(prompt,
+                                                   bypass_history_and_system_prompt=bypass_history_and_system_prompt)
+            json_objects = self.extract_json(result)
+            validation_error = self._json_validation_error(json_objects, json_validation_schema)
 
-        @retry_decorator
-        def _llm_json_response_with_timeout(inner_prompt: str | list, validation_schema: str = "") \
-                -> tuple[dict | None, str, str]:
-            try:
-                # run async request on separate thread, wait for result with timeout and automatic retry
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(self.llm_json_response, inner_prompt, validation_schema)
-                    result = future.result(timeout=self.total_response_timeout_seconds)
-            except Exception as caught_e:
-                # catch and return the error with no response
-                return None, "", str(caught_e)
-            return result
+            if validation_error and self.json_retries > 0:
+                # if there was a validation error, retry up to the allowed number of times
+                retries = 0
+                while retries < self.json_retries:
+                    # draft our retry prompt
+                    if json_validation_schema:
+                        retry_prompt_text = f"Your JSON response was invalid. Please correct it " \
+                                            f"and respond with valid JSON (with no code block " \
+                                            f"or other content). Just 100% valid JSON, according " \
+                                            f"to the instructions given. Your JSON response " \
+                                            f"should match the following schema:\n\n" \
+                                            f"{json_validation_schema}\n\nYour JSON response:"
+                    else:
+                        retry_prompt_text = "Your JSON response was invalid. Please correct it " \
+                                            "and respond with valid JSON (with no code block " \
+                                            "or other content). Just 100% valid JSON, according " \
+                                            "to the instructions given.\n\nYour JSON response:"
 
-        return _llm_json_response_with_timeout(prompt, json_validation_schema)
+                    # if we're maintaining history already, can just use the text as the prompt
+                    if self.maintain_history and not bypass_history_and_system_prompt:
+                        retry_prompt = retry_prompt_text
+                    else:
+                        # otherwise, we need to manually add the relevant history, starting with the current prompt
+                        if isinstance(prompt, str):
+                            # if the prompt was a string, convert to list for the retry
+                            retry_prompt = [self.user_message(prompt)]
+                        else:
+                            # otherwise, make copy of the prompt list for retry
+                            retry_prompt = prompt.copy()
+                        # next add the original response
+                        retry_prompt.append(self.ai_message(result))
+                        # finally, add the retry prompt text
+                        retry_prompt.append(self.user_message(retry_prompt_text))
 
-    @traceable(run_type="llm", name="ai_workflows.llm_utilities.get_llm_response")
-    def get_llm_response(self, prompt: str | list) -> str:
+                    # execute the retry
+                    result = await self.a_get_llm_response(
+                        retry_prompt, bypass_history_and_system_prompt=bypass_history_and_system_prompt)
+                    json_objects = self.extract_json(result)
+                    validation_error = self._json_validation_error(json_objects, json_validation_schema)
+                    retries += 1
+
+                    # break if we got a valid response, otherwise keep going till we run out of retries
+                    if not validation_error:
+                        break
+
+            if validation_error:
+                # if we're out of retries and still have a validation error, we'll fall through to return it
+                pass
+        except Exception as caught_e:
+            # catch and return the error with no response
+            return None, "", str(caught_e)
+
+        # return result
+        return json_objects[0] if not validation_error else None, result, validation_error
+
+    @traceable(run_type="chain", name="ai_workflows.get_llm_response")
+    def get_llm_response(self, prompt: str | list, bypass_history_and_system_prompt=False) -> str:
         """
-        Call out to LLM for a response to a prompt.
+        Call out to LLM for a response to a prompt (synchronous version).
 
         :param prompt: Prompt to send to the LLM (simple string or list of user and assistant messages).
         :type prompt: str | list
+        :param bypass_history_and_system_prompt: Whether to bypass the history and system prompt. Default is False.
+        :type bypass_history_and_system_prompt: bool
         :return: Content of the LLM response.
         :rtype: str
         """
@@ -274,45 +372,312 @@ class LLMInterface:
         if isinstance(prompt, str):
             prompt = [self.user_message(prompt)]
 
+        # construct a full prompt with history if we're maintaining it
+        if self.maintain_history and not bypass_history_and_system_prompt:
+            prompt_with_history = self.conversation_history + prompt
+        else:
+            prompt_with_history = prompt
+
         # execute LLM evaluation, with appropriate parameters, depending on the LLM type
         if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
-            result = self.llm.chat.completions.create(model=self.model, messages=prompt, max_tokens=self.max_tokens,
-                                                      temperature=self.temperature,
-                                                      response_format={"type": "json_object"})
-            # extract the message from the response
-            message = result.choices[0].message
-            # check for a refusal
-            if hasattr(message, 'refusal') and message.refusal:
-                raise RuntimeError(f"OpenAI refused to generate a response: {message.refusal}")
-            # otherwise, return the content
-            retval = message.content
+            result = self._llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
+                                    temperature=self.temperature, response_format={"type": "json_object"},
+                                    no_system_prompt=bypass_history_and_system_prompt)
+            # extract the content from the response
+            retval = result.choices[0].message.content
         elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
-            # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
-            if self.using_langsmith:
-                # grab the run tree and add starting metadata
-                rt = get_current_run_tree()
-                rt.metadata["model"] = self.model
-                rt.metadata["max_tokens"] = self.max_tokens
-                rt.metadata["temperature"] = self.temperature
-                # call Anthropic
-                result = self.llm.messages.create(model=self.model, messages=prompt, max_tokens=self.max_tokens,
-                                                  temperature=self.temperature)
-                # add usage metadata to the run tree (but it won't show nicely in the UI)
-                # (to show it nicely, we'd need to return a dict with a usage key and the content)
-                rt.add_metadata({
-                    "usage": {
-                        "prompt_tokens": result.usage.input_tokens,
-                        "completion_tokens": result.usage.output_tokens,
-                        "total_tokens": result.usage.input_tokens + result.usage.output_tokens
-                    }})
-            else:
-                result = self.llm.messages.create(model=self.model, messages=prompt, max_tokens=self.max_tokens,
-                                                  temperature=self.temperature)
+            result = self._llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
+                                    temperature=self.temperature, no_system_prompt=bypass_history_and_system_prompt)
+            # merge response data together
             retval = ''.join(block.text for block in result.content)
         else:
             raise ValueError("LLM type not recognized.")
 
+        # if we're maintaining history, add prompt and response
+        if self.maintain_history and not bypass_history_and_system_prompt:
+            self.conversation_history += prompt + [self.ai_message(retval)]
+
         # return the content of the LLM response
+        return retval
+
+    @traceable(run_type="chain", name="ai_workflows.a_get_llm_response")
+    async def a_get_llm_response(self, prompt: str | list, bypass_history_and_system_prompt=False) -> str:
+        """
+        Call out to LLM for a response to a prompt (async version).
+
+        :param prompt: Prompt to send to the LLM (simple string or list of user and assistant messages).
+        :type prompt: str | list
+        :param bypass_history_and_system_prompt: Whether to bypass the history and system prompt. Default is False.
+        :type bypass_history_and_system_prompt: bool
+        :return: Content of the LLM response.
+        :rtype: str
+        """
+
+        # if prompt is a string, convert to message list for consistency
+        if isinstance(prompt, str):
+            prompt = [self.user_message(prompt)]
+
+        # construct a full prompt with history if we're maintaining it
+        if self.maintain_history and not bypass_history_and_system_prompt:
+            prompt_with_history = self.conversation_history + prompt
+        else:
+            prompt_with_history = prompt
+
+        # execute LLM evaluation, with appropriate parameters, depending on the LLM type
+        if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
+            result = await self._a_llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
+                                            temperature=self.temperature, response_format={"type": "json_object"},
+                                            no_system_prompt=bypass_history_and_system_prompt)
+            # extract the content from the response
+            retval = result.choices[0].message.content
+        elif isinstance(self.a_llm, AsyncAnthropic) or isinstance(self.a_llm, AsyncAnthropicBedrock):
+            result = await self._a_llm_call(model=self.model, messages=prompt_with_history,
+                                            max_tokens=self.max_tokens, temperature=self.temperature,
+                                            no_system_prompt=bypass_history_and_system_prompt)
+            # merge response data together
+            retval = ''.join(block.text for block in result.content)
+        else:
+            raise ValueError("LLM type not recognized.")
+
+        # if we're maintaining history, add prompt and response
+        if self.maintain_history and not bypass_history_and_system_prompt:
+            self.conversation_history += prompt + [self.ai_message(retval)]
+
+        # return the content of the LLM response
+        return retval
+
+    def _llm_call(self, *args, **kwargs) -> (ChatCompletion | AsyncStream[ChatCompletionChunk] | Message |
+                                             AnthropicAsyncStream[RawMessageStreamEvent]):
+        """
+        Internal wrapper function to call OpenAI's create method with an open-ended range of args and kwargs
+        (synchronous version), with timeout and retries.
+
+        :param args: Positional arguments to pass to the create method.
+        :param kwargs: Keyword arguments to pass to the create method. Include 'no_system_prompt' as False if you
+            want to suppress automatic addition of the configured system prompt.
+        :return: Result of the create method call.
+        """
+
+        # define the retry decorator inside the method (so that we can use instance variables)
+        retry_decorator = retry(
+            stop=stop_after_attempt(self.number_of_retries),
+            wait=wait_fixed(self.seconds_between_retries),
+            retry=retry_if_exception_type((APITimeoutError, APIError, APIConnectionError, RateLimitError,
+                                           InternalServerError, AnthropicAPIConnectionError, AnthropicRateLimitError,
+                                           AnthropicInternalServerError)),
+            reraise=True
+        )
+
+        @retry_decorator
+        @traceable(run_type="llm", name="ai_workflows._llm_call_inner")
+        def _llm_call_inner(*iargs, **ikwargs) -> (ChatCompletion | AsyncStream[ChatCompletionChunk] | Message |
+                                                   AnthropicAsyncStream[RawMessageStreamEvent]):
+            if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+                return self.llm.chat.completions.create(*iargs, **ikwargs)
+            elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
+                # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
+                # grab the run tree and add starting metadata
+                rt = get_current_run_tree()
+                rt.metadata["model"] = ikwargs["model"]
+                rt.metadata["max_tokens"] = ikwargs["max_tokens"]
+                rt.metadata["temperature"] = ikwargs["temperature"]
+                # call Anthropic
+                inner_result = self.llm.messages.create(*iargs, **ikwargs)
+                # add usage metadata to the run tree (but it won't show nicely in the UI)
+                # (to show it nicely, we'd need to return a dict with a usage key and the content)
+                rt.add_metadata({
+                    "usage_metadata": {
+                        "prompt_tokens": inner_result.usage.input_tokens,
+                        "completion_tokens": inner_result.usage.output_tokens,
+                        "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
+                    }})
+                return inner_result
+            else:
+                raise ValueError("LLM type not recognized.")
+
+        # add timeout to kwargs
+        kwargs['timeout'] = self.total_response_timeout_seconds
+
+        # handle no_system_prompt flag
+        no_system_prompt = False
+        if 'no_system_prompt' in kwargs:
+            no_system_prompt = kwargs.pop('no_system_prompt')
+
+        # execute call, adding system prompt if present and desired
+        if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+            # prepend system prompt to messages, if present
+            if self.system_prompt and not no_system_prompt and 'messages' in kwargs:
+                kwargs['messages'] = [self.system_message(self.system_prompt)] + kwargs['messages']
+
+            # automatically retry refusals
+            for _ in range(self.number_of_retries):
+                result = _llm_call_inner(*args, **kwargs)
+                message = result.choices[0].message
+                if hasattr(message, 'refusal') and message.refusal:
+                    continue
+                return result
+            raise RuntimeError(f"OpenAI refused to generate a response after {self.number_of_retries} retries")
+        elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
+            # add system prompt to parameters, if we have one
+            if self.system_prompt and not no_system_prompt:
+                kwargs['system'] = self.system_prompt
+
+            return _llm_call_inner(*args, **kwargs)
+        else:
+            raise ValueError("LLM type not recognized.")
+
+    async def _a_llm_call(self, *args, **kwargs) \
+            -> (ChatCompletion | AsyncStream[ChatCompletionChunk] | Message |
+                AnthropicAsyncStream[RawMessageStreamEvent]):
+        """
+        Internal wrapper function to call OpenAI's create method with an open-ended range of args and kwargs (async
+        version), with timeout and retries.
+
+        :param args: Positional arguments to pass to the create method.
+        :param kwargs: Keyword arguments to pass to the create method. Include 'no_system_prompt' as False if you
+            want to suppress automatic addition of the configured system prompt.
+        :return: Result of the create method call.
+        """
+
+        # define the retry decorator inside the method (so that we can use instance variables)
+        retry_decorator = retry(
+            stop=stop_after_attempt(self.number_of_retries),
+            wait=wait_fixed(self.seconds_between_retries),
+            retry=retry_if_exception_type((APITimeoutError, APIError, APIConnectionError, RateLimitError,
+                                           InternalServerError, AnthropicAPIConnectionError, AnthropicRateLimitError,
+                                           AnthropicInternalServerError)),
+            reraise=True
+        )
+
+        @retry_decorator
+        @traceable(run_type="llm", name="ai_workflows._a_llm_call_inner")
+        async def _a_llm_call_inner(*iargs, **ikwargs) -> (ChatCompletion | AsyncStream[ChatCompletionChunk] | Message |
+                                                           AnthropicAsyncStream[RawMessageStreamEvent]):
+            if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
+                return await self.a_llm.chat.completions.create(*iargs, **ikwargs)
+            elif isinstance(self.a_llm, AsyncAnthropic) or isinstance(self.a_llm, AsyncAnthropicBedrock):
+                # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
+                # grab the run tree and add starting metadata
+                rt = get_current_run_tree()
+                rt.metadata["model"] = ikwargs["model"]
+                rt.metadata["max_tokens"] = ikwargs["max_tokens"]
+                rt.metadata["temperature"] = ikwargs["temperature"]
+                # call Anthropic
+                inner_result = await self.a_llm.messages.create(*iargs, **ikwargs)
+                # add usage metadata to the run tree (but it won't show nicely in the UI)
+                # (to show it nicely, we'd need to return a dict with a usage key and the content)
+                rt.add_metadata({
+                    "usage_metadata": {
+                        "prompt_tokens": inner_result.usage.input_tokens,
+                        "completion_tokens": inner_result.usage.output_tokens,
+                        "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
+                    }})
+                return inner_result
+            else:
+                raise ValueError("LLM type not recognized.")
+
+        # add timeout to kwargs
+        kwargs['timeout'] = self.total_response_timeout_seconds
+
+        # handle no_system_prompt flag
+        no_system_prompt = False
+        if 'no_system_prompt' in kwargs:
+            no_system_prompt = kwargs.pop('no_system_prompt')
+
+        # add system prompt and refusal retries
+        if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
+            # prepend system prompt to messages, if present
+            if self.system_prompt and not no_system_prompt and 'messages' in kwargs:
+                kwargs['messages'] = [self.system_message(self.system_prompt)] + kwargs['messages']
+
+            # automatically retry refusals
+            for _ in range(self.number_of_retries):
+                result = await _a_llm_call_inner(*args, **kwargs)
+                message = result.choices[0].message
+                if hasattr(message, 'refusal') and message.refusal:
+                    continue
+                return result
+            raise RuntimeError(f"OpenAI refused to generate a response after {self.number_of_retries} retries")
+        elif isinstance(self.a_llm, AsyncAnthropic) or isinstance(self.a_llm, AsyncAnthropicBedrock):
+            # add system prompt to parameters, if we have one
+            if self.system_prompt and not no_system_prompt:
+                kwargs['system'] = self.system_prompt
+
+            return await _a_llm_call_inner(*args, **kwargs)
+        else:
+            raise ValueError("LLM type not recognized.")
+
+    def count_tokens(self, text: str) -> int:
+        """
+        Count the number of tokens in a text string (synchronous version).
+
+        :param text: Text to count tokens in.
+        :type text: str
+        :return: Number of tokens in the text.
+        :rtype: int
+        """
+
+        # use appropriate token-counting method depending on the LLM provider
+        if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+            encoding = tiktoken.encoding_for_model(self.model)
+            return len(encoding.encode(text))
+        else:
+            count = self.llm.beta.messages.count_tokens(model=self.model,
+                                                        messages=[{"role": "user", "content": text}])
+            return count.input_tokens
+
+    async def a_count_tokens(self, text: str) -> int:
+        """
+        Count the number of tokens in a text string (async version).
+
+        :param text: Text to count tokens in.
+        :type text: str
+        :return: Number of tokens in the text.
+        :rtype: int
+        """
+
+        # use appropriate token-counting method depending on the LLM provider
+        if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
+            encoding = tiktoken.encoding_for_model(self.model)
+            return len(encoding.encode(text))
+        else:
+            count = await self.a_llm.beta.messages.count_tokens(model=self.model,
+                                                                messages=[{"role": "user", "content": text}])
+            return count.input_tokens
+
+    def reset_history(self):
+        """
+        Reset the conversation history.
+
+        This function clears the conversation history maintained by the LLM interface.
+        """
+
+        self.conversation_history = []
+
+    def system_message(self, system_message: str) -> dict:
+        """
+        Generate a system message.
+
+        This function takes a system message and returns it in the message format expected by the LLM.
+
+        :param system_message: System message to format.
+        :type system_message: str
+        :return: Formatted system message.
+        :rtype: dict
+        """
+
+        # Anthropic system prompts are passed separately; here, we'll use the "user" role if it's an Anthropic model
+        retval = {
+            "role": "user" if isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock) else "system",
+            "content": [
+                {
+                    "type": "text",
+                    "text": system_message
+                }
+            ]
+        }
+
+        # return system message
         return retval
 
     @staticmethod
@@ -339,7 +704,7 @@ class LLMInterface:
             ]
         }
 
-        # return user message
+        # return AI message
         return retval
 
     @staticmethod
@@ -490,14 +855,66 @@ class LLMInterface:
                     f"Current size: {len(current_bytes)} bytes"
                 )
 
-    def generate_json_schema(self, json_output_spec: str) -> str:
+    async def a_generate_json_schema(self, json_output_spec: str) -> str:
         """
-        Generate a JSON schema, adequate for JSON validation, based on a human-language JSON output specification.
+        Generate a JSON schema, adequate for JSON validation, based on a human-language JSON output specification
+        (async version).
 
         :param json_output_spec: Human-language JSON output specification.
         :type json_output_spec: str
         :return: JSON schema suitable for JSON validation purposes.
         :rtype: str
+        """
+
+        # generate prompt and validation schema
+        json_schema_prompt, json_schema_schema = self._get_schema_prompt_and_meta_schema(json_output_spec)
+
+        # call out to LLM to generate JSON schema
+        parsed_response, response, error = await self.a_get_json_response(json_schema_prompt, json_schema_schema,
+                                                                          bypass_history_and_system_prompt=True)
+
+        # raise error if any
+        if error:
+            raise RuntimeError(f"Failed to generate JSON schema: {error}")
+
+        # return as nicely-formatted version of parsed response
+        return json.dumps(parsed_response, indent=2)
+
+    def generate_json_schema(self, json_output_spec: str) -> str:
+        """
+        Generate a JSON schema, adequate for JSON validation, based on a human-language JSON output specification
+        (synchronous version).
+
+        :param json_output_spec: Human-language JSON output specification.
+        :type json_output_spec: str
+        :return: JSON schema suitable for JSON validation purposes.
+        :rtype: str
+        """
+
+        # generate prompt and validation schema
+        json_schema_prompt, json_schema_schema = self._get_schema_prompt_and_meta_schema(json_output_spec)
+
+        # call out to LLM to generate JSON schema
+        parsed_response, response, error = self.get_json_response(json_schema_prompt, json_schema_schema,
+                                                                  bypass_history_and_system_prompt=True)
+
+        # raise error if any
+        if error:
+            raise RuntimeError(f"Failed to generate JSON schema: {error}")
+
+        # return as nicely-formatted version of parsed response
+        return json.dumps(parsed_response, indent=2)
+
+    @staticmethod
+    def _get_schema_prompt_and_meta_schema(json_output_spec: str) -> tuple[str, str]:
+        """
+        Get the prompt for generating a JSON schema and the JSON schema for validating the generated schema.
+
+        :param json_output_spec: Human-language JSON output specification.
+        :type json_output_spec: str
+        :return: Tuple with the prompt for generating a JSON schema and the JSON schema for validating the generated
+          schema.
+        :rtype: tuple[str, str]
         """
 
         # create a prompt for the LLM to generate a JSON schema
@@ -682,18 +1099,10 @@ The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
     },
     "default": true
 }"""
-
-        # call out to LLM to generate JSON schema
-        parsed_response, response, error = self.llm_json_response_with_timeout(json_schema_prompt, json_schema_schema)
-
-        # raise error if any
-        if error:
-            raise RuntimeError(f"Failed to generate JSON schema: {error}")
-
-        # return as nicely-formatted version of parsed response
-        return json.dumps(parsed_response, indent=2)
+        return json_schema_prompt, json_schema_schema
 
     @staticmethod
+    @traceable(run_type="parser", name="ai_workflows.extract_json")
     def extract_json(text: str) -> list[dict]:
         """
         Extract JSON content from a string, handling various formats.
@@ -788,3 +1197,50 @@ The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
 
         # if we made it this far, that means the JSON is valid
         return ""
+
+
+class JSONSchemaCache:
+    """Cache for JSON schemas."""
+
+    # shared class-level member for schema cache
+    schema_cache: dict[str, str] = {}
+
+    @staticmethod
+    def get_json_schema(json_description: str) -> str:
+        """
+        Retrieve cached schema from JSON description.
+
+        :param json_description: Description of the JSON format.
+        :type json_description: str
+        :return: JSON schema or empty string if not found.
+        :rtype: str
+        """
+
+        return JSONSchemaCache.schema_cache.get(JSONSchemaCache._get_description_hash(json_description), "")
+
+    @staticmethod
+    def put_json_schema(json_description: str, json_schema: str):
+        """
+        Cache a JSON schema.
+
+        :param json_description: Description of the JSON format.
+        :type json_description: str
+        :param json_schema: JSON schema to cache.
+        :type json_schema: str
+        """
+
+        JSONSchemaCache.schema_cache[JSONSchemaCache._get_description_hash(json_description)] = json_schema
+
+    @staticmethod
+    def _get_description_hash(description: str) -> str:
+        """
+        Get a hash of the description for use as a cache key.
+
+        :param description: Description to hash.
+        :type description: str
+        :return: Hashed description.
+        :rtype: str
+        """
+
+        normalized_description = ' '.join(description.split()).lower()
+        return hashlib.sha256(normalized_description.encode('utf-8')).hexdigest()
