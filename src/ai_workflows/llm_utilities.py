@@ -48,7 +48,7 @@ class LLMInterface:
     a_llm: AsyncOpenAI | AsyncAzureOpenAI | AsyncAnthropic | AsyncAnthropicBedrock | None
     model: str
     json_retries: int = 2
-    max_tokens: int = 16384
+    max_tokens: int = 4096
     using_langsmith: bool = False
     system_prompt = ""
     maintain_history = False
@@ -61,7 +61,7 @@ class LLMInterface:
                  langsmith_project: str = 'ai_workflows', langsmith_endpoint: str = 'https://api.smith.langchain.com',
                  json_retries: int = 2, anthropic_api_key: str = None, anthropic_model: str = None,
                  bedrock_model: str = None, bedrock_region: str = "us-east-1", bedrock_aws_profile: str = None,
-                 max_tokens: int = None, system_prompt: str = "", maintain_history: bool = False,
+                 max_tokens: int = 4096, system_prompt: str = "", maintain_history: bool = False,
                  starting_chat_history: list[tuple] = None):
         """
         Initialize the LLM interface for LLM interactions.
@@ -108,8 +108,7 @@ class LLMInterface:
         :type bedrock_region: str
         :param bedrock_aws_profile: AWS profile for Bedrock access. Default is None.
         :type bedrock_aws_profile: str
-        :param max_tokens: Maximum tokens for LLM responses. Default is None, which auto-sets to 16384 for OpenAI and
-            4096 for Anthropic.
+        :param max_tokens: Maximum tokens for LLM responses. Default is 4096.
         :type max_tokens: int
         :param system_prompt: System prompt to add to all LLM calls. Default is "".
         :type system_prompt: str
@@ -135,10 +134,7 @@ class LLMInterface:
         self.number_of_retries = number_of_retries
         self.seconds_between_retries = seconds_between_retries
         self.json_retries = json_retries
-        if max_tokens:
-            self.max_tokens = max_tokens
-        else:
-            self.max_tokens = 16384 if openai_api_key or azure_api_key else 4096
+        self.max_tokens = max_tokens
         self.system_prompt = system_prompt
         self.maintain_history = maintain_history
 
