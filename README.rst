@@ -78,18 +78,22 @@ Overview
 
 Here are the basics:
 
-#. The ``llm_utilities`` module provides a simple interface for interacting with a large language model (LLM). It
+#. `The llm_utilities module <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html>`_ provides
+   a simple interface for interacting with a large language model (LLM). It
    includes the ``LLMInterface`` class that can be used for executing individual workflow steps.
-#. The ``document_utilities`` module provides an interface for extracting Markdown-formatted text and structured data
+#. `The document_utilities module <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#>`_
+   provides an interface for extracting Markdown-formatted text and structured data
    from various file formats. It includes functions for reading Word, PDF, Excel, CSV, HTML, and other file formats,
    and then converting them into Markdown or structured data for use in LLM interactions.
-#. The `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_ notebook provides a simple example of how to use the ``document_utilities``
+#. The `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_
+   notebook provides a simple example of how to use the ``document_utilities``
    module to convert files to Markdown format, in either Google Colab or a local environment.
 #. The `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_
    notebook provides a more realistic workflow example that uses the ``document_utilities`` module to convert a survey
    file to Markdown format and then to JSON format, and then uses the ``llm_utilities`` module to evaluate survey
    questions using an LLM. It also works in either Google Colab or a local environment.
-#. The `example-testing.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-testing.ipynb>`_ notebook provides a basic set-up for testing Markdown conversion methods (LLM-assisted
+#. The `example-testing.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-testing.ipynb>`_
+   notebook provides a basic set-up for testing Markdown conversion methods (LLM-assisted
    vs. not-LLM-assisted). At the moment, this notebook only works in a local environment.
 
 Examples
@@ -169,7 +173,8 @@ Technical notes
 LLMInterface
 ^^^^^^^^^^^^
 
-The ``LLMInterface`` class provides a simple LLM interface with the following features:
+`The LLMInterface class <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface>`_
+provides a simple LLM interface with the following features:
 
 #. Support for both OpenAI and Anthropic models, either directly or via Azure or AWS Bedrock
 
@@ -191,52 +196,66 @@ The ``LLMInterface`` class provides a simple LLM interface with the following fe
 
 Key methods:
 
-#. ``get_llm_response()``: Get a response from an LLM
+#. `get_llm_response() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.get_llm_response>`_:
+   Get a response from an LLM
 
-#. ``get_json_response()``: Get a JSON response from an LLM
+#. `get_json_response() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.get_json_response>`_:
+   Get a JSON response from an LLM
 
-#. ``user_message()``: Get a properly-formatted user message to include in an LLM prompt
+#. `user_message() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.user_message>`_:
+   Get a properly-formatted user message to include in an LLM prompt
 
-#. ``user_message_with_image()``: Get a properly-formatted user message to include in an LLM prompt, including an image
+#. `user_message_with_image() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.user_message_with_image>`_:
+   Get a properly-formatted user message to include in an LLM prompt, including an image
    attachment
 
-#. ``generate_json_schema()``: Generate a JSON schema from a human-readable description
+#. `generate_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.generate_json_schema>`_:
+   Generate a JSON schema from a human-readable description
 
-#. ``count_tokens()``: Count the number of tokens in a string
+#. `count_tokens() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.count_tokens>`_:
+   Count the number of tokens in a string
 
 JSONSchemaCache
 ^^^^^^^^^^^^^^^
 
-The ``JSONSchemaCache`` class provides a simple in-memory cache for JSON schemas, so that they don't have to be
+`The JSONSchemaCache class <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache>`_
+provides a simple in-memory cache for JSON schemas, so that they don't have to be
 regenerated repeatedly.
 
 Key methods:
 
-#. ``get_json_schema()``: Get a JSON schema from the cache (returns empty string if none found)
+#. `get_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache.get_json_schema>`_:
+   Get a JSON schema from the cache (returns empty string if none found)
 
-#. ``put_json_schema()``: Put a JSON schema into the cache
+#. `put_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache.put_json_schema>`_:
+   Put a JSON schema into the cache
 
 DocumentInterface
 ^^^^^^^^^^^^^^^^^
 
-The ``DocumentInterface`` class provides a simple interface for converting files to Markdown or JSON format.
+`The DocumentInterface class <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface>`_ provides a simple interface for converting files to Markdown or JSON format.
 
 Key methods:
 
-#. ``convert_to_markdown()``: Convert a file to Markdown format, using an LLM if available and deemed helpful (if you
+#. `convert_to_markdown() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.convert_to_markdown>`_:
+   Convert a file to Markdown format, using an LLM if available and deemed helpful (if you
    specify ``use_text=True``, it will include raw text in any LLM prompt, which might improve results)
 
-#. ``convert_to_json()``: Convert a file to JSON format using an LLM (if you specify ``markdown_first=True``, it will
+#. `convert_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.convert_to_json>`_:
+   Convert a file to JSON format using an LLM (if you specify ``markdown_first=True``, it will
    convert to Markdown first, then convert to JSON; otherwise, it might convert to JSON page-by-page, using an LLM)
 
-#. ``markdown_to_json()``: Convert a Markdown string to JSON format using an LLM
+#. `markdown_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.markdown_to_json>`_:
+   Convert a Markdown string to JSON format using an LLM
 
-#. ``markdown_to_text()``: Convert a Markdown string to plain text
+#. `markdown_to_text() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.markdown_to_text>`_:
+   Convert a Markdown string to plain text
 
 Markdown conversion
 """""""""""""""""""
 
-The ``DocumentInterface.convert_to_markdown()`` method uses one of several methods to convert files to Markdown.
+The `DocumentInterface.convert_to_markdown() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.convert_to_markdown>`_
+method uses one of several methods to convert files to Markdown.
 
 If an ``LLMInterface`` is available:
 
@@ -270,9 +289,10 @@ Otherwise, we convert files to Markdown using one of the following methods (in o
 JSON conversion
 """""""""""""""
 
-You can convert from Markdown to JSON using the ``DocumentInterface.markdown_to_json()`` method, or you can convert
-files directly to JSON using the ``DocumentInterface.convert_to_json()`` method. The latter method will most often
-convert to Markdown first and then to JSON, but it will convert straight to JSON with a page-by-page approach if:
+You can convert from Markdown to JSON using the `DocumentInterface.markdown_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.markdown_to_json>`_
+method, or you can convert files directly to JSON using the `DocumentInterface.convert_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.convert_to_json>`_
+method. The latter method will most often convert to Markdown first and then to JSON, but it will convert straight to
+JSON with a page-by-page approach if:
 
 #. The ``markdown_first`` parameter is explicitly provided as ``False`` and converting the file to Markdown would
    naturally use an LLM with a page-by-page approach (see the section above)
@@ -320,6 +340,23 @@ Known issues
    d. For Anthropic models, images in prompts don't show properly.
 
 #. The support for conversation history in ``LLMInterface`` can overflow the context window in long conversations.
+
+ImportError: libGL.so.1: cannot open shared object file
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+If you use this package in a headless environment (e.g., within a Docker container), you might encounter the following
+error::
+
+    ImportError: libGL.so.1: cannot open shared object file: No such file or directory
+
+This is caused by a conflict between how the Docling and Unstructured packages depend on opencv. The fix is to install
+all of your requirements like normal, and then uninstall and re-install opencv::
+
+    pip uninstall -y opencv-python opencv-python-headless && pip install opencv-python-headless
+
+In a Dockerfile (after your ``pip install`` commands)::
+
+    RUN pip uninstall -y opencv-python opencv-python-headless && pip install opencv-python-headless
 
 Roadmap
 -------
