@@ -20,29 +20,33 @@ with open('README.rst') as file:
 
 setup(
     name='py-ai-workflows',
-    version='0.19.0',
+    version='0.20.0',
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
     python_requires='>=3.10',
     install_requires=[
-        'unstructured[all-docs]',
         'openai',
         'anthropic[bedrock]',
         'tiktoken',
         'langsmith>=0.1.63,<0.2',
         'tenacity',
-        'PyMuPDF',
-        'pymupdf4llm',
         'Pillow',
-        'openpyxl',
-        'nltk==3.9.1',
         'jsonschema',
-        'beautifulsoup4>=4.12.0',
-        'markdown>=3.5.0',
         'colab-or-not~=0.4.0',
-        'json_repair==0.*',
-        'docling>=2.8.1,<3.0'
+        'json_repair==0.*'
     ],
+    extras_require={
+        'docs': [
+            'unstructured[all-docs]',
+            'PyMuPDF',
+            'pymupdf4llm',
+            'openpyxl',
+            'nltk==3.9.1',
+            'beautifulsoup4>=4.12.0',
+            'markdown>=3.5.0',
+            'docling>=2.8.1,<3.0'
+        ]
+    },
     package_data={
         'ai_workflows': ['resources/*'], # include resource files in package
     },

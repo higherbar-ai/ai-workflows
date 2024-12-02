@@ -13,8 +13,19 @@
 #  limitations under the License.
 
 from .llm_utilities import LLMInterface, JSONSchemaCache
-from .document_utilities import (DocumentInterface, ExcelDocumentConverter, MarkdownSplitter, PDFDocumentConverter,
-                                 UnstructuredDocumentConverter)
+try:
+    from .document_utilities import (
+        DocumentInterface, ExcelDocumentConverter, MarkdownSplitter, PDFDocumentConverter, UnstructuredDocumentConverter
+    )
+except ImportError as e:
+    # we expect an import error if the optional dependencies are not installed
+    DocumentInterface = None
+    ExcelDocumentConverter = None
+    MarkdownSplitter = None
+    PDFDocumentConverter = None
+    UnstructuredDocumentConverter = None
+    print(f"Warning: ai_workflows.document_utilities module not loaded; you probably need to "
+          f"pip install py-ai-workflows[docs] to install necessary dependencies. Import exception: {e}")
 
 # report our current version, as installed
 from importlib.metadata import version
