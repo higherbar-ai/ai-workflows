@@ -11,9 +11,18 @@ Installation
 
 Install the latest version with pip::
 
+    pip install py-ai-workflows[docs]
+
+If you don't need anything in the ``document_utilities`` module (relating to reading, parsing, and converting
+documents), you can install a slimmed-down version with::
+
     pip install py-ai-workflows
 
-You'll also need to install several other dependencies, which you can do by running the
+Additional document-parsing dependencies
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you installed the full version with document-processing capabilities (``py-ai-workflows[docs]``), you'll also need
+to install several other dependencies, which you can do by running the
 `initial-setup.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/initial-setup.ipynb>`_ Jupyter
 notebook — or by installing them manually as follows.
 
@@ -39,6 +48,9 @@ Then install ``libreoffice`` for converting Office documents to PDF.
 
     # install LibreOffice for document processing
     choco install -y libreoffice
+
+AWS Bedrock support
+^^^^^^^^^^^^^^^^^^^
 
 Finally, if you're accessing models via AWS Bedrock, the AWS CLI needs to be installed and configured for AWS access.
 
