@@ -134,9 +134,7 @@ class DocumentInterface:
         :type json_output_spec: str
         :param markdown_first: Whether to convert to Markdown first and then to JSON using an LLM. Set this to true if
           page-by-page conversion is not working well for elements that span pages; the Markdown-first approach will
-          convert page-by-page to Markdown and then convert to JSON as the next step. When going the Markdown route,
-          the JSON conversion will take place in a single step, with all of the Markdown supplied at once — so it
-          won't work if the file Markdown is too large to fit in the LLM context window. The default is None, which will
+          convert page-by-page to Markdown and then convert to JSON as the next step. The default is None, which will
           use the Markdown path for smaller PDF files and the page-by-page path for larger ones.
         :type markdown_first: Optional[bool]
         :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
