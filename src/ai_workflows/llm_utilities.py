@@ -189,6 +189,7 @@ class LLMInterface:
 
     @traceable(run_type="prompt", name="ai_workflows.get_json_response")
     def get_json_response(self, prompt: str | list, json_validation_schema: str = "",
+                          json_validation_desc: str = "",
                           bypass_history_and_system_prompt=False) -> tuple[dict | None, str, str]:
         """
         Call out to LLM for structured JSON response (synchronous version).
@@ -197,9 +198,10 @@ class LLMInterface:
 
         :param prompt: Prompt to send to the LLM.
         :type prompt: str | list
-        :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "", which
-          means no validation.
+        :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "".
         :type json_validation_schema: str
+        :param json_validation_desc: Description of the JSON schema for validating response (optional). Default is "".
+            If supplied, will be converted into a JSON schema, cached in-memory, and used for validation.
         :param bypass_history_and_system_prompt: Whether to bypass the history and system prompt. Default is False.
         :type bypass_history_and_system_prompt: bool
         :return: Tuple with parsed JSON response, raw LLM response, and error message (if any).
@@ -208,6 +210,16 @@ class LLMInterface:
 
         # execute LLM evaluation, but catch and return any exceptions
         try:
+            # if we have a JSON schema description, convert it to a schema and cache it
+            if not json_validation_schema and json_validation_desc:
+                # use cached schema if available
+                json_validation_schema = JSONSchemaCache.get_json_schema(json_validation_desc)
+
+                # if no cached version available, generate and cache it now
+                if not json_validation_schema:
+                    json_validation_schema = self.generate_json_schema(json_validation_desc)
+                    JSONSchemaCache.put_json_schema(json_validation_desc, json_validation_schema)
+
             # invoke LLM and parse+validate JSON response
             result = self.get_llm_response(prompt,
                                            bypass_history_and_system_prompt=bypass_history_and_system_prompt)
@@ -641,6 +653,78 @@ class LLMInterface:
             count = await self.a_llm.beta.messages.count_tokens(model=self.model,
                                                                 messages=[{"role": "user", "content": text}])
             return count.input_tokens
+
+    def enforce_max_tokens(self, text: str, max_tokens: int) -> str:
+        """
+        Truncate a string as necessary to fit within a maximum number of tokens (synchronous version).
+
+        :param text: Text to potentially truncate.
+        :type text: str
+        :param max_tokens: Maximum number of tokens to allow.
+        :type max_tokens: int
+        :return: Original or truncated string.
+        :rtype: str
+        """
+
+        # if text is already under the limit, return as-is
+        ntokens = self.count_tokens(text)
+        if ntokens <= max_tokens:
+            return text
+
+        # otherwise, truncate using different methods depending on the LLM provider
+        if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+            # for OpenAI, can convert to tokens, truncate, then convert back
+            encoding = tiktoken.encoding_for_model(self.model)
+            tokens = list(encoding.encode(text))[:max_tokens]
+            return encoding.decode(tokens)
+        else:
+            # use binary search to find maximum length that fits within token limit (minimizing count_tokens() calls)
+            low, high = 0, len(text)
+            while low < high:
+                mid = (low + high) // 2
+                if self.count_tokens(text[:mid]) <= max_tokens:
+                    low = mid + 1
+                else:
+                    high = mid
+
+            # return truncated text
+            return text[:low - 1]
+
+    async def a_enforce_max_tokens(self, text: str, max_tokens: int) -> str:
+        """
+        Truncate a string as necessary to fit within a maximum number of tokens (async version).
+
+        :param text: Text to potentially truncate.
+        :type text: str
+        :param max_tokens: Maximum number of tokens to allow.
+        :type max_tokens: int
+        :return: Original or truncated string.
+        :rtype: str
+        """
+
+        # if text is already under the limit, return as-is
+        ntokens = self.count_tokens(text)
+        if ntokens <= max_tokens:
+            return text
+
+        # otherwise, truncate using different methods depending on the LLM provider
+        if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
+            # for OpenAI, can convert to tokens, truncate, then convert back
+            encoding = tiktoken.encoding_for_model(self.model)
+            tokens = list(encoding.encode(text))[:max_tokens]
+            return encoding.decode(tokens)
+        else:
+            # use binary search to find maximum length that fits within token limit (minimizing count_tokens() calls)
+            low, high = 0, len(text)
+            while low < high:
+                mid = (low + high) // 2
+                if await self.a_count_tokens(text[:mid]) <= max_tokens:
+                    low = mid + 1
+                else:
+                    high = mid
+
+            # return truncated text
+            return text[:low - 1]
 
     def reset_history(self):
         """

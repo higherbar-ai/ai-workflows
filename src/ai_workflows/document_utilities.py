@@ -14,7 +14,7 @@
 
 """Utilities for reading and processing documents for AI workflows."""
 
-from ai_workflows.llm_utilities import LLMInterface, JSONSchemaCache
+from ai_workflows.llm_utilities import LLMInterface
 import fitz  # (PyMuPDF)
 from fitz.utils import get_pixmap
 import pymupdf4llm
@@ -60,8 +60,6 @@ class DocumentInterface:
         ".uop", ".uos", ".uot", ".vsd", ".vsdx", ".wdb", ".wps", ".wri", ".xls", ".xlsx"
     ]
     max_xlsx_via_pdf_pages: int = 10
-    max_json_via_markdown_pages = 50
-    max_json_via_markdown_tokens = 25000
     max_json_via_markdown_chunk_tokens = None
     max_parallel_requests = 5
 
@@ -134,10 +132,8 @@ class DocumentInterface:
         :type json_output_spec: str
         :param markdown_first: Whether to convert to Markdown first and then to JSON using an LLM. Set this to true if
           page-by-page conversion is not working well for elements that span pages; the Markdown-first approach will
-          convert page-by-page to Markdown and then convert to JSON as the next step. When going the Markdown route,
-          the JSON conversion will take place in a single step, with all of the Markdown supplied at once — so it
-          won't work if the file Markdown is too large to fit in the LLM context window. The default is None, which will
-          use the Markdown path for smaller PDF files and the page-by-page path for larger ones.
+          convert page-by-page to Markdown and then convert to JSON as the next step. The default is None, which will
+          use the Markdown path for small PDF files and the page-by-page path for larger ones.
         :type markdown_first: Optional[bool]
         :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
           schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
@@ -155,28 +151,17 @@ class DocumentInterface:
 
             # if we're going to convert from PDF using an LLM, we need to figure out the right choice
             if self.llm_interface and (ext == '.pdf' or ext in DocumentInterface.via_pdf_file_extensions):
-                # convert to Markdown without LLM assistance
+                # first convert to Markdown without LLM assistance
                 doc_interface_no_llm = DocumentInterface()
                 markdown = doc_interface_no_llm.convert_to_markdown(filepath)
+                markdown_tokens = self.llm_interface.count_tokens(markdown)
 
-                # if PDF doesn't have much text, it might be scanned or image-based and require OCR
-                if len(markdown) < 200 and ext == '.pdf':
-                    # check number of PDF pages and decide whether to use Markdown or direct-to-JSON
-                    doc = fitz.open(filepath)
-                    if len(doc) <= DocumentInterface.max_json_via_markdown_pages:
-                        # if we're within the limit, use Markdown conversion first
-                        markdown_first = True
-                    else:
-                        # if we're over the limit, use page-by-page JSON conversion
-                        markdown_first = False
+                if markdown_tokens <= self.max_json_via_markdown_chunk_tokens:
+                    # if we can do JSON conversion all in one shot, use doc->Markdown->JSON path
+                    markdown_first = True
                 else:
-                    # use tokens to decide
-                    if self.llm_interface.count_tokens(markdown) <= DocumentInterface.max_json_via_markdown_tokens:
-                        # if we're within the limit, use Markdown conversion first
-                        markdown_first = True
-                    else:
-                        # if we're over the limit, use page-by-page JSON conversion
-                        markdown_first = False
+                    # otherwise, use doc->JSON path (the page-by-page approach)
+                    markdown_first = False
             else:
                 # for other file types or without an LLM, they always use Markdown first anyway
                 markdown_first = True
@@ -426,18 +411,14 @@ class DocumentInterface:
         if not max_chunk_size:
             max_chunk_size = self.max_json_via_markdown_chunk_tokens
 
-        # handle automatic schema generation, with cache
+        # handle automatic schema generation
+        json_validation_desc = ""
         if json_output_schema is None:
             # explicitly skip schema validation
             json_output_schema = ""
         elif not json_output_schema:
-            # use cached schema if available
-            json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
-
-            # if no cached version available, generate and cache it now
-            if not json_output_schema:
-                json_output_schema = self.llm_interface.generate_json_schema(json_output_spec)
-                JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
+            # auto-generate validation schema based on description
+            json_validation_desc = json_output_spec
 
         # handle processing of Markdown chunks in batches
         def process_chunks_in_batches(chunks, max_parallel_requests):
@@ -459,7 +440,10 @@ Markdown text enclosed by |@| delimiters:
 Your JSON response precisely following the instructions given above the Markdown text:"""
 
                 response_dict, response_text, error = self.llm_interface.get_json_response(
-                    prompt=json_prompt, json_validation_schema=json_output_schema)
+                    prompt=json_prompt,
+                    json_validation_schema=json_output_schema,
+                    json_validation_desc=json_validation_desc
+                )
 
                 if error:
                     logging.error(f"Error extracting JSON from Markdown: {error}")
@@ -928,18 +912,14 @@ class PDFDocumentConverter:
         # convert PDF to images
         images_and_text = PDFDocumentConverter.pdf_to_images_and_text(pdf_path=pdf_path, dpi=self.pdf_image_dpi)
 
-        # handle automatic schema generation, with cache
+        # handle automatic schema generation
+        json_validation_desc = ""
         if json_output_schema is None:
             # explicitly skip schema validation
             json_output_schema = ""
         elif not json_output_schema:
-            # use cached schema if available
-            json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
-
-            # if no cached version available, generate and cache it now
-            if not json_output_schema:
-                json_output_schema = self.llm_interface.generate_json_schema(json_output_spec)
-                JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
+            # auto-generate validation schema based on description
+            json_validation_desc = json_output_spec
 
         # function to process a single page
         def process_page(i, img, txt):
@@ -951,7 +931,10 @@ class PDFDocumentConverter:
 
             # call out to the LLM and process the returned JSON
             response_dict, response_text, error = self.llm_interface.get_json_response(
-                prompt=prompt_with_image, json_validation_schema=json_output_schema)
+                prompt=prompt_with_image,
+                json_validation_schema=json_output_schema,
+                json_validation_desc=json_validation_desc
+            )
 
             # raise exception on error
             if error:

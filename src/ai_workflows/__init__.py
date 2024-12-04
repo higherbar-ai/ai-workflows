@@ -24,8 +24,8 @@ except ImportError as e:
     MarkdownSplitter = None
     PDFDocumentConverter = None
     UnstructuredDocumentConverter = None
-    print(f"Warning: ai_workflows.document_utilities module not loaded; you probably need to "
-          f"pip install py-ai-workflows[docs] to install necessary dependencies. Import exception: {e}")
+    print(f"FYI: ai_workflows.document_utilities module not loaded; if you want to work with documents, you'll need to "
+          f"pip install py-ai-workflows[docs] to install the necessary dependencies. Import exception: {e}")
 
 # report our current version, as installed
 from importlib.metadata import version

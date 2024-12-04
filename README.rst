@@ -100,8 +100,12 @@ Here are the basics:
 #. The `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_
    notebook provides a simple example of how to use the ``document_utilities``
    module to convert files to Markdown format, in either Google Colab or a local environment.
+#. The `example-qual-analysis-1.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-qual-analysis-1.ipynb>`_
+   notebook provides a more realistic workflow example that uses both the ``document_utilities`` and the
+   ``llm_utilities`` modules to perform a simple qualitative analysis on a set of documents. It also works in either
+   Google Colab or a local environment.
 #. The `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_
-   notebook provides a more realistic workflow example that uses the ``document_utilities`` module to convert a survey
+   notebook provides another workflow example that uses the ``document_utilities`` module to convert a survey
    file to Markdown format and then to JSON format, and then uses the ``llm_utilities`` module to evaluate survey
    questions using an LLM. It also works in either Google Colab or a local environment.
 #. The `example-testing.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-testing.ipynb>`_
@@ -141,42 +145,27 @@ Converting a file to JSON format::
         json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
     )
 
-Converting a file to JSON format (with automatic JSON schema generation and response validation+retry)::
+Requesting a JSON response from an LLM::
 
     from ai_workflows.llm_utilities import LLMInterface
-    from ai_workflows.document_utilities import DocumentInterface
 
     llm_interface = LLMInterface(openai_api_key=openai_api_key)
-    doc_interface = DocumentInterface(llm_interface=llm_interface)
-    json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
-    json_output_schema = llm_interface.generate_json_schema(json_output_spec)
-    dict_list = doc_interface.convert_to_json(
-        file_path,
-        json_context = "The file contains a survey instrument with questions to be administered to rural Zimbabwean household heads by a trained enumerator.",
-        json_job = "Your job is to extract questions and response options from the survey instrument.",
-        json_output_spec = json_output_spec,
-        json_validation_schema = json_output_schema
-    )
 
-Converting a file to JSON format (with automatic JSON schema generation and response validation+retry) (plus in-memory
-caching of JSON schemas so they aren't generated every time)::
+    json_output_spec = """Return correctly-formatted JSON with the following fields:
 
-    from ai_workflows.llm_utilities import LLMInterface, JSONSchemaCache
-    from ai_workflows.document_utilities import DocumentInterface
+    * `answer` (string): Your answer to the question."""
 
-    llm_interface = LLMInterface(openai_api_key=openai_api_key)
-    doc_interface = DocumentInterface(llm_interface=llm_interface)
-    json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
-    json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
-    if not json_output_schema:
-        json_output_schema = llm_interface.generate_json_schema(json_output_spec)
-        JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
-    dict_list = doc_interface.convert_to_json(
-        file_path,
-        json_context = "The file contains a survey instrument with questions to be administered to rural Zimbabwean household heads by a trained enumerator.",
-        json_job = "Your job is to extract questions and response options from the survey instrument.",
-        json_output_spec = json_output_spec,
-        json_validation_schema = json_output_schema
+    full_prompt = f"""Answer the following question:
+
+    (question)
+
+    {json_output_spec}
+
+    Your JSON response precisely following the instructions given:"""
+
+    parsed_response, raw_response, error = llm_interface.get_json_response(
+        prompt = full_prompt,
+        json_validation_desc = json_output_spec
     )
 
 Technical notes
@@ -222,17 +211,22 @@ Key methods:
    attachment
 
 #. `generate_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.generate_json_schema>`_:
-   Generate a JSON schema from a human-readable description
+   Generate a JSON schema from a human-readable description (called automatically when JSON output
+   description is supplied to ``get_json_response()``)
 
 #. `count_tokens() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.count_tokens>`_:
    Count the number of tokens in a string
+
+#. `enforce_max_tokens() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.enforce_max_tokens>`_:
+   Truncate a string as necessary to fit within a maximum number of tokens
 
 JSONSchemaCache
 ^^^^^^^^^^^^^^^
 
 `The JSONSchemaCache class <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache>`_
 provides a simple in-memory cache for JSON schemas, so that they don't have to be
-regenerated repeatedly.
+regenerated repeatedly. It's used internally by both the ``LLMInterface`` and ``DocumentInterface`` classes, to avoid
+repeatedly generating the same schema for the same JSON output specification.
 
 Key methods:
 
@@ -254,8 +248,8 @@ Key methods:
    specify ``use_text=True``, it will include raw text in any LLM prompt, which might improve results)
 
 #. `convert_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.convert_to_json>`_:
-   Convert a file to JSON format using an LLM (if you specify ``markdown_first=True``, it will
-   convert to Markdown first, then convert to JSON; otherwise, it might convert to JSON page-by-page, using an LLM)
+   Convert a file to JSON format using an LLM (could convert the document to JSON page-by-page or convert to Markdown
+   first and then JSON; specify ``markdown_first=True`` if you definitely don't want to go the page-by-page route)
 
 #. `markdown_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.markdown_to_json>`_:
    Convert a Markdown string to JSON format using an LLM
@@ -308,13 +302,15 @@ JSON with a page-by-page approach if:
 
 #. The ``markdown_first`` parameter is explicitly provided as ``False`` and converting the file to Markdown would
    naturally use an LLM with a page-by-page approach (see the section above)
-#. Or: converting the file to Markdown would naturally use an LLM with a page-by-page approach,
-   the ``markdown_first`` parameter is not explicitly provided as ``True``, and the file's content doesn't look too
-   large to fit in the LLM context window (<= 50 pages or 25,000 tokens).
+#. Or: the ``markdown_first`` parameter is left at the default (``None``), converting the file to Markdown would
+   naturally use an LLM with a page-by-page approach, and the file's Markdown content is too large to convert to JSON
+   in a single LLM call.
 
 The advantage of converting to JSON directly can also be a disadvantage: parsing to JSON is done page-by-page. If
-structural elements don't span page boundaries, this can be great; however, if elements *do* span page boundaries, then
-it will make things worse.
+JSON elements don't span page boundaries, this can be great; however, if elements *do* span page boundaries,
+it won't work well. For longer documents, Markdown-to-JSON conversion also happens in batches due to LLM token
+limits, but efforts are made to split batches by natural boundaries (e.g., between sections). Thus, the
+doc->Markdown->JSON path can work better if page boundaries aren't the best way to batch the conversion process.
 
 Whether or not you convert to JSON via Markdown, JSON conversion always uses LLM assistance. The parameters you supply
 are:
