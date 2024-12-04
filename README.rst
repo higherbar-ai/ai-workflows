@@ -100,8 +100,12 @@ Here are the basics:
 #. The `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_
    notebook provides a simple example of how to use the ``document_utilities``
    module to convert files to Markdown format, in either Google Colab or a local environment.
+#. The `example-qual-analysis-1.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-qual-analysis-1.ipynb>`_
+   notebook provides a more realistic workflow example that uses both the ``document_utilities`` and the
+   ``llm_utilities`` modules to perform a simple qualitative analysis on a set of documents. It also works in either
+   Google Colab or a local environment.
 #. The `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_
-   notebook provides a more realistic workflow example that uses the ``document_utilities`` module to convert a survey
+   notebook provides another workflow example that uses the ``document_utilities`` module to convert a survey
    file to Markdown format and then to JSON format, and then uses the ``llm_utilities`` module to evaluate survey
    questions using an LLM. It also works in either Google Colab or a local environment.
 #. The `example-testing.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-testing.ipynb>`_
@@ -159,7 +163,7 @@ Requesting a JSON response from an LLM::
 
     Your JSON response precisely following the instructions given:"""
 
-    dict_list = llm_interface.get_json_response(
+    parsed_response, raw_response, error = llm_interface.get_json_response(
         prompt = full_prompt,
         json_validation_desc = json_output_spec
     )
