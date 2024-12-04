@@ -213,6 +213,9 @@ Key methods:
 #. `count_tokens() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.count_tokens>`_:
    Count the number of tokens in a string
 
+#. `enforce_max_tokens() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.enforce_max_tokens>`_:
+   Truncate a string as necessary to fit within a maximum number of tokens
+
 JSONSchemaCache
 ^^^^^^^^^^^^^^^
 

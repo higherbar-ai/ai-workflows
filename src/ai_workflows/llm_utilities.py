@@ -654,6 +654,78 @@ class LLMInterface:
                                                                 messages=[{"role": "user", "content": text}])
             return count.input_tokens
 
+    def enforce_max_tokens(self, text: str, max_tokens: int) -> str:
+        """
+        Truncate a string as necessary to fit within a maximum number of tokens (synchronous version).
+
+        :param text: Text to potentially truncate.
+        :type text: str
+        :param max_tokens: Maximum number of tokens to allow.
+        :type max_tokens: int
+        :return: Original or truncated string.
+        :rtype: str
+        """
+
+        # if text is already under the limit, return as-is
+        ntokens = self.count_tokens(text)
+        if ntokens <= max_tokens:
+            return text
+
+        # otherwise, truncate using different methods depending on the LLM provider
+        if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+            # for OpenAI, can convert to tokens, truncate, then convert back
+            encoding = tiktoken.encoding_for_model(self.model)
+            tokens = list(encoding.encode(text))[:max_tokens]
+            return encoding.decode(tokens)
+        else:
+            # use binary search to find maximum length that fits within token limit (minimizing count_tokens() calls)
+            low, high = 0, len(text)
+            while low < high:
+                mid = (low + high) // 2
+                if self.count_tokens(text[:mid]) <= max_tokens:
+                    low = mid + 1
+                else:
+                    high = mid
+
+            # return truncated text
+            return text[:low - 1]
+
+    async def a_enforce_max_tokens(self, text: str, max_tokens: int) -> str:
+        """
+        Truncate a string as necessary to fit within a maximum number of tokens (async version).
+
+        :param text: Text to potentially truncate.
+        :type text: str
+        :param max_tokens: Maximum number of tokens to allow.
+        :type max_tokens: int
+        :return: Original or truncated string.
+        :rtype: str
+        """
+
+        # if text is already under the limit, return as-is
+        ntokens = self.count_tokens(text)
+        if ntokens <= max_tokens:
+            return text
+
+        # otherwise, truncate using different methods depending on the LLM provider
+        if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
+            # for OpenAI, can convert to tokens, truncate, then convert back
+            encoding = tiktoken.encoding_for_model(self.model)
+            tokens = list(encoding.encode(text))[:max_tokens]
+            return encoding.decode(tokens)
+        else:
+            # use binary search to find maximum length that fits within token limit (minimizing count_tokens() calls)
+            low, high = 0, len(text)
+            while low < high:
+                mid = (low + high) // 2
+                if await self.a_count_tokens(text[:mid]) <= max_tokens:
+                    low = mid + 1
+                else:
+                    high = mid
+
+            # return truncated text
+            return text[:low - 1]
+
     def reset_history(self):
         """
         Reset the conversation history.
