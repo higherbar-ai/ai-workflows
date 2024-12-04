@@ -60,8 +60,6 @@ class DocumentInterface:
         ".uop", ".uos", ".uot", ".vsd", ".vsdx", ".wdb", ".wps", ".wri", ".xls", ".xlsx"
     ]
     max_xlsx_via_pdf_pages: int = 10
-    max_json_via_markdown_pages = 50
-    max_json_via_markdown_tokens = 25000
     max_json_via_markdown_chunk_tokens = None
     max_parallel_requests = 5
 
@@ -135,7 +133,7 @@ class DocumentInterface:
         :param markdown_first: Whether to convert to Markdown first and then to JSON using an LLM. Set this to true if
           page-by-page conversion is not working well for elements that span pages; the Markdown-first approach will
           convert page-by-page to Markdown and then convert to JSON as the next step. The default is None, which will
-          use the Markdown path for smaller PDF files and the page-by-page path for larger ones.
+          use the Markdown path for small PDF files and the page-by-page path for larger ones.
         :type markdown_first: Optional[bool]
         :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
           schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
@@ -153,28 +151,17 @@ class DocumentInterface:
 
             # if we're going to convert from PDF using an LLM, we need to figure out the right choice
             if self.llm_interface and (ext == '.pdf' or ext in DocumentInterface.via_pdf_file_extensions):
-                # convert to Markdown without LLM assistance
+                # first convert to Markdown without LLM assistance
                 doc_interface_no_llm = DocumentInterface()
                 markdown = doc_interface_no_llm.convert_to_markdown(filepath)
+                markdown_tokens = self.llm_interface.count_tokens(markdown)
 
-                # if PDF doesn't have much text, it might be scanned or image-based and require OCR
-                if len(markdown) < 200 and ext == '.pdf':
-                    # check number of PDF pages and decide whether to use Markdown or direct-to-JSON
-                    doc = fitz.open(filepath)
-                    if len(doc) <= DocumentInterface.max_json_via_markdown_pages:
-                        # if we're within the limit, use Markdown conversion first
-                        markdown_first = True
-                    else:
-                        # if we're over the limit, use page-by-page JSON conversion
-                        markdown_first = False
+                if markdown_tokens <= self.max_json_via_markdown_chunk_tokens:
+                    # if we can do JSON conversion all in one shot, use doc->Markdown->JSON path
+                    markdown_first = True
                 else:
-                    # use tokens to decide
-                    if self.llm_interface.count_tokens(markdown) <= DocumentInterface.max_json_via_markdown_tokens:
-                        # if we're within the limit, use Markdown conversion first
-                        markdown_first = True
-                    else:
-                        # if we're over the limit, use page-by-page JSON conversion
-                        markdown_first = False
+                    # otherwise, use doc->JSON path (the page-by-page approach)
+                    markdown_first = False
             else:
                 # for other file types or without an LLM, they always use Markdown first anyway
                 markdown_first = True

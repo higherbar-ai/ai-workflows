@@ -254,8 +254,8 @@ Key methods:
    specify ``use_text=True``, it will include raw text in any LLM prompt, which might improve results)
 
 #. `convert_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.convert_to_json>`_:
-   Convert a file to JSON format using an LLM (if you specify ``markdown_first=True``, it will
-   convert to Markdown first, then convert to JSON; otherwise, it might convert to JSON page-by-page, using an LLM)
+   Convert a file to JSON format using an LLM (could convert the document to JSON page-by-page or convert to Markdown
+   first and then JSON; specify ``markdown_first=True`` if you definitely don't want to go the page-by-page route)
 
 #. `markdown_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.markdown_to_json>`_:
    Convert a Markdown string to JSON format using an LLM
@@ -308,13 +308,15 @@ JSON with a page-by-page approach if:
 
 #. The ``markdown_first`` parameter is explicitly provided as ``False`` and converting the file to Markdown would
    naturally use an LLM with a page-by-page approach (see the section above)
-#. Or: converting the file to Markdown would naturally use an LLM with a page-by-page approach,
-   the ``markdown_first`` parameter is not explicitly provided as ``True``, and the file's content doesn't look too
-   large to fit in the LLM context window (<= 50 pages or 25,000 tokens).
+#. Or: the ``markdown_first`` parameter is left at the default (``None``), converting the file to Markdown would
+   naturally use an LLM with a page-by-page approach, and the file's Markdown content is too large to convert to JSON
+   in a single LLM call.
 
 The advantage of converting to JSON directly can also be a disadvantage: parsing to JSON is done page-by-page. If
-structural elements don't span page boundaries, this can be great; however, if elements *do* span page boundaries, then
-it will make things worse.
+JSON elements don't span page boundaries, this can be great; however, if elements *do* span page boundaries,
+it won't work well. For longer documents, Markdown-to-JSON conversion also happens in batches due to LLM token
+limits, but efforts are made to split batches by natural boundaries (e.g., between sections). Thus, the
+doc->Markdown->JSON path can work better if page boundaries aren't the best way to batch the conversion process.
 
 Whether or not you convert to JSON via Markdown, JSON conversion always uses LLM assistance. The parameters you supply
 are:
