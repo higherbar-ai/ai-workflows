@@ -14,7 +14,7 @@
 
 """Utilities for reading and processing documents for AI workflows."""
 
-from ai_workflows.llm_utilities import LLMInterface, JSONSchemaCache
+from ai_workflows.llm_utilities import LLMInterface
 import fitz  # (PyMuPDF)
 from fitz.utils import get_pixmap
 import pymupdf4llm
@@ -411,18 +411,14 @@ class DocumentInterface:
         if not max_chunk_size:
             max_chunk_size = self.max_json_via_markdown_chunk_tokens
 
-        # handle automatic schema generation, with cache
+        # handle automatic schema generation
+        json_validation_desc = ""
         if json_output_schema is None:
             # explicitly skip schema validation
             json_output_schema = ""
         elif not json_output_schema:
-            # use cached schema if available
-            json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
-
-            # if no cached version available, generate and cache it now
-            if not json_output_schema:
-                json_output_schema = self.llm_interface.generate_json_schema(json_output_spec)
-                JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
+            # auto-generate validation schema based on description
+            json_validation_desc = json_output_spec
 
         # handle processing of Markdown chunks in batches
         def process_chunks_in_batches(chunks, max_parallel_requests):
@@ -444,7 +440,10 @@ Markdown text enclosed by |@| delimiters:
 Your JSON response precisely following the instructions given above the Markdown text:"""
 
                 response_dict, response_text, error = self.llm_interface.get_json_response(
-                    prompt=json_prompt, json_validation_schema=json_output_schema)
+                    prompt=json_prompt,
+                    json_validation_schema=json_output_schema,
+                    json_validation_desc=json_validation_desc
+                )
 
                 if error:
                     logging.error(f"Error extracting JSON from Markdown: {error}")
@@ -913,18 +912,14 @@ class PDFDocumentConverter:
         # convert PDF to images
         images_and_text = PDFDocumentConverter.pdf_to_images_and_text(pdf_path=pdf_path, dpi=self.pdf_image_dpi)
 
-        # handle automatic schema generation, with cache
+        # handle automatic schema generation
+        json_validation_desc = ""
         if json_output_schema is None:
             # explicitly skip schema validation
             json_output_schema = ""
         elif not json_output_schema:
-            # use cached schema if available
-            json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
-
-            # if no cached version available, generate and cache it now
-            if not json_output_schema:
-                json_output_schema = self.llm_interface.generate_json_schema(json_output_spec)
-                JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
+            # auto-generate validation schema based on description
+            json_validation_desc = json_output_spec
 
         # function to process a single page
         def process_page(i, img, txt):
@@ -936,7 +931,10 @@ class PDFDocumentConverter:
 
             # call out to the LLM and process the returned JSON
             response_dict, response_text, error = self.llm_interface.get_json_response(
-                prompt=prompt_with_image, json_validation_schema=json_output_schema)
+                prompt=prompt_with_image,
+                json_validation_schema=json_output_schema,
+                json_validation_desc=json_validation_desc
+            )
 
             # raise exception on error
             if error:

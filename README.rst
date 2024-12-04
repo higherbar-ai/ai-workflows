@@ -141,42 +141,27 @@ Converting a file to JSON format::
         json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
     )
 
-Converting a file to JSON format (with automatic JSON schema generation and response validation+retry)::
+Requesting a JSON response from an LLM::
 
     from ai_workflows.llm_utilities import LLMInterface
-    from ai_workflows.document_utilities import DocumentInterface
 
     llm_interface = LLMInterface(openai_api_key=openai_api_key)
-    doc_interface = DocumentInterface(llm_interface=llm_interface)
-    json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
-    json_output_schema = llm_interface.generate_json_schema(json_output_spec)
-    dict_list = doc_interface.convert_to_json(
-        file_path,
-        json_context = "The file contains a survey instrument with questions to be administered to rural Zimbabwean household heads by a trained enumerator.",
-        json_job = "Your job is to extract questions and response options from the survey instrument.",
-        json_output_spec = json_output_spec,
-        json_validation_schema = json_output_schema
-    )
 
-Converting a file to JSON format (with automatic JSON schema generation and response validation+retry) (plus in-memory
-caching of JSON schemas so they aren't generated every time)::
+    json_output_spec = """Return correctly-formatted JSON with the following fields:
 
-    from ai_workflows.llm_utilities import LLMInterface, JSONSchemaCache
-    from ai_workflows.document_utilities import DocumentInterface
+    * `answer` (string): Your answer to the question."""
 
-    llm_interface = LLMInterface(openai_api_key=openai_api_key)
-    doc_interface = DocumentInterface(llm_interface=llm_interface)
-    json_output_spec = "Return correctly-formatted JSON with the following fields: ..."
-    json_output_schema = JSONSchemaCache.get_json_schema(json_output_spec)
-    if not json_output_schema:
-        json_output_schema = llm_interface.generate_json_schema(json_output_spec)
-        JSONSchemaCache.put_json_schema(json_output_spec, json_output_schema)
-    dict_list = doc_interface.convert_to_json(
-        file_path,
-        json_context = "The file contains a survey instrument with questions to be administered to rural Zimbabwean household heads by a trained enumerator.",
-        json_job = "Your job is to extract questions and response options from the survey instrument.",
-        json_output_spec = json_output_spec,
-        json_validation_schema = json_output_schema
+    full_prompt = f"""Answer the following question:
+
+    (question)
+
+    {json_output_spec}
+
+    Your JSON response precisely following the instructions given:"""
+
+    dict_list = llm_interface.get_json_response(
+        prompt = full_prompt,
+        json_validation_desc = json_output_spec
     )
 
 Technical notes
@@ -222,7 +207,8 @@ Key methods:
    attachment
 
 #. `generate_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.generate_json_schema>`_:
-   Generate a JSON schema from a human-readable description
+   Generate a JSON schema from a human-readable description (called automatically when JSON output
+   description is supplied to ``get_json_response()``)
 
 #. `count_tokens() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.count_tokens>`_:
    Count the number of tokens in a string
@@ -232,7 +218,8 @@ JSONSchemaCache
 
 `The JSONSchemaCache class <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache>`_
 provides a simple in-memory cache for JSON schemas, so that they don't have to be
-regenerated repeatedly.
+regenerated repeatedly. It's used internally by both the ``LLMInterface`` and ``DocumentInterface`` classes, to avoid
+repeatedly generating the same schema for the same JSON output specification.
 
 Key methods:
 

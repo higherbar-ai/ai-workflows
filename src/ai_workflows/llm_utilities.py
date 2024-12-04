@@ -189,6 +189,7 @@ class LLMInterface:
 
     @traceable(run_type="prompt", name="ai_workflows.get_json_response")
     def get_json_response(self, prompt: str | list, json_validation_schema: str = "",
+                          json_validation_desc: str = "",
                           bypass_history_and_system_prompt=False) -> tuple[dict | None, str, str]:
         """
         Call out to LLM for structured JSON response (synchronous version).
@@ -197,9 +198,10 @@ class LLMInterface:
 
         :param prompt: Prompt to send to the LLM.
         :type prompt: str | list
-        :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "", which
-          means no validation.
+        :param json_validation_schema: JSON schema for validating the JSON response (optional). Default is "".
         :type json_validation_schema: str
+        :param json_validation_desc: Description of the JSON schema for validating response (optional). Default is "".
+            If supplied, will be converted into a JSON schema, cached in-memory, and used for validation.
         :param bypass_history_and_system_prompt: Whether to bypass the history and system prompt. Default is False.
         :type bypass_history_and_system_prompt: bool
         :return: Tuple with parsed JSON response, raw LLM response, and error message (if any).
@@ -208,6 +210,16 @@ class LLMInterface:
 
         # execute LLM evaluation, but catch and return any exceptions
         try:
+            # if we have a JSON schema description, convert it to a schema and cache it
+            if not json_validation_schema and json_validation_desc:
+                # use cached schema if available
+                json_validation_schema = JSONSchemaCache.get_json_schema(json_validation_desc)
+
+                # if no cached version available, generate and cache it now
+                if not json_validation_schema:
+                    json_validation_schema = self.generate_json_schema(json_validation_desc)
+                    JSONSchemaCache.put_json_schema(json_validation_desc, json_validation_schema)
+
             # invoke LLM and parse+validate JSON response
             result = self.get_llm_response(prompt,
                                            bypass_history_and_system_prompt=bypass_history_and_system_prompt)
