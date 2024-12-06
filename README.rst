@@ -102,8 +102,8 @@ Here are the basics:
    module to convert files to Markdown format, in either Google Colab or a local environment.
 #. The `example-qual-analysis-1.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-qual-analysis-1.ipynb>`_
    notebook provides a more realistic workflow example that uses both the ``document_utilities`` and the
-   ``llm_utilities`` modules to perform a simple qualitative analysis on a set of documents. It also works in either
-   Google Colab or a local environment.
+   ``llm_utilities`` modules to perform a simple qualitative analysis on a set of interview transcripts. It also works
+   in either Google Colab or a local environment.
 #. The `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_
    notebook provides another workflow example that uses the ``document_utilities`` module to convert a survey
    file to Markdown format and then to JSON format, and then uses the ``llm_utilities`` module to evaluate survey
