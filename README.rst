@@ -371,24 +371,11 @@ In a Dockerfile (after your ``pip install`` commands)::
 Roadmap
 -------
 
-There's much that can be improved here. For example:
-
-* For what's already here:
-    * Adding unit tests
-    * Tracking and reporting LLM costs
-    * Improving evaluation and comparison methods
-* Supporting more file formats and conversion methods:
-    * Trying Claude's `direct PDF support <https://docs.anthropic.com/en/docs/build-with-claude/pdf-support>`_
-* Expanding capabilities:
-    * Adding support for logging workflow steps and results
-    * Adding async versions of the ``DocumentInterface`` methods
-    * Adding support for more LLMs
-    * Adding support for a higher-level workflow-step concept that simplifies use of the ``LLMInterface`` and
-      ``DocumentInterface`` classes
-    * Adding basic RAG support
-    * Expanding RAG support for knowledge graphs
-    * Adding some kind of Docker support to extend the RAG/KG implementations to, e.g., ChatGPT via ChatGPT Actions
-    * Adding automatic summarization of conversation histories to stay within a fixed token budget
+This package is a work-in-progress. See
+`the GitHub issues page <https://github.com/higherbar-ai/ai-workflows/issues>`_ for known
+`bugs <https://github.com/higherbar-ai/ai-workflows/labels/bug>`_ and
+`enhancements being considered <https://github.com/higherbar-ai/ai-workflows/labels/enhancement>`_.
+Feel free to react to or comment on existing issues, or to open new issues.
 
 Credits
 -------
