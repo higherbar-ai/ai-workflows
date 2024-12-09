@@ -331,23 +331,8 @@ If you find that things aren't working well, try including some few-shot example
 Known issues
 ^^^^^^^^^^^^
 
-#. The example Google Colab notebooks pop up a message during installation that offers to restart the runtime. You have
-   to click cancel so as not to interrupt execution.
-
-#. The automatic generation and caching of JSON schemas (for response validation) can work poorly when batches of
-   similar requests are all launched in parallel (as each request will generate and cache the schema).
-
-#. LangSmith tracing support is imperfect in a few ways:
-
-   a. For OpenAI models, the top-level token usage counts are roughly doubled. You have to look to the inner LLM call
-      for an accurate count of input and output tokens.
-   b. For Anthropic models, the token usage doesn't show up at all, but you can find it by clicking into the metadata
-      for the inner LLM call.
-   c. For Anthropic models, the system prompt is only visible if you click into the inner LLM call and then switch the
-      *Input* display to *Raw input*.
-   d. For Anthropic models, images in prompts don't show properly.
-
-#. The support for conversation history in ``LLMInterface`` can overflow the context window in long conversations.
+See `the GitHub issues page <https://github.com/higherbar-ai/ai-workflows/labels/bug>`_ for the most up-to-date list of
+known issues.
 
 ImportError: libGL.so.1: cannot open shared object file
 """""""""""""""""""""""""""""""""""""""""""""""""""""""
