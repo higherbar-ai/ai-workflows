@@ -3,8 +3,25 @@ ai_workflows
 ============
 
 The ``ai_workflows`` package is a toolkit for supporting AI workflows (i.e., workflows that are pre-scripted and
-repeatable, but utilize LLMs for various tasks). It's still in early development, but is ready to support piloting and
-experimentation.
+repeatable, but utilize LLMs for various tasks).
+
+The goal is to lower the bar for social scientists and others to
+leverage LLMs in repeatable, reliable, and transparent ways. See
+`this blog post <https://www.linkedin.com/pulse/repeatable-reliable-transparent-graduating-from-ai-workflows-robert-nb4ge/>`_
+for a discussion,
+`here <https://ai-workflows.readthedocs.io/>`_
+for the full documentation, and here for example Jupyter notebooks:
+
+#. `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_:
+   loading different file formats and converting them into a Markdown syntax that LLMs can understand.
+#. `example-qual-analysis-1.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-qual-analysis-1.ipynb>`_:
+   a more realistic workflow example that performs a simple qualitative analysis on a set of interview transcripts.
+#. `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_:
+   another workflow example that critically evaluates surveys question-by-question.
+
+Tip: if you're not completely comfortable working in Python, use
+`GitHub Copilot in VS Code <https://code.visualstudio.com/docs/copilot/setup>`_
+or Gemini as a copilot in `Google Colab <https://colab.google/>`_.
 
 Installation
 ------------
@@ -331,23 +348,8 @@ If you find that things aren't working well, try including some few-shot example
 Known issues
 ^^^^^^^^^^^^
 
-#. The example Google Colab notebooks pop up a message during installation that offers to restart the runtime. You have
-   to click cancel so as not to interrupt execution.
-
-#. The automatic generation and caching of JSON schemas (for response validation) can work poorly when batches of
-   similar requests are all launched in parallel (as each request will generate and cache the schema).
-
-#. LangSmith tracing support is imperfect in a few ways:
-
-   a. For OpenAI models, the top-level token usage counts are roughly doubled. You have to look to the inner LLM call
-      for an accurate count of input and output tokens.
-   b. For Anthropic models, the token usage doesn't show up at all, but you can find it by clicking into the metadata
-      for the inner LLM call.
-   c. For Anthropic models, the system prompt is only visible if you click into the inner LLM call and then switch the
-      *Input* display to *Raw input*.
-   d. For Anthropic models, images in prompts don't show properly.
-
-#. The support for conversation history in ``LLMInterface`` can overflow the context window in long conversations.
+See `the GitHub issues page <https://github.com/higherbar-ai/ai-workflows/labels/bug>`_ for the most up-to-date list of
+known issues.
 
 ImportError: libGL.so.1: cannot open shared object file
 """""""""""""""""""""""""""""""""""""""""""""""""""""""
