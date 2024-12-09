@@ -3,8 +3,25 @@ ai_workflows
 ============
 
 The ``ai_workflows`` package is a toolkit for supporting AI workflows (i.e., workflows that are pre-scripted and
-repeatable, but utilize LLMs for various tasks). It's still in early development, but is ready to support piloting and
-experimentation.
+repeatable, but utilize LLMs for various tasks).
+
+The goal is to lower the bar for social scientists and others to
+leverage LLMs in repeatable, reliable, and transparent ways. See
+`this blog post <https://www.linkedin.com/pulse/repeatable-reliable-transparent-graduating-from-ai-workflows-robert-nb4ge/>`_
+for a discussion,
+`here <https://ai-workflows.readthedocs.io/>`_
+for the full documentation, and here for example Jupyter notebooks:
+
+#. `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_:
+   loading different file formats and converting them into a Markdown syntax that LLMs can understand.
+#. `example-qual-analysis-1.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-qual-analysis-1.ipynb>`_:
+   a more realistic workflow example that performs a simple qualitative analysis on a set of interview transcripts.
+#. `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_:
+   another workflow example that critically evaluates surveys question-by-question.
+
+Tip: if you're not completely comfortable working in Python, use
+`GitHub Copilot in VS Code <https://code.visualstudio.com/docs/copilot/setup>`_
+or Gemini as a copilot in `Google Colab <https://colab.google/>`_.
 
 Installation
 ------------
