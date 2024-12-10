@@ -9,8 +9,9 @@ The goal is to lower the bar for social scientists and others to
 leverage LLMs in repeatable, reliable, and transparent ways. See
 `this blog post <https://www.linkedin.com/pulse/repeatable-reliable-transparent-graduating-from-ai-workflows-robert-nb4ge/>`_
 for a discussion,
-`here <https://ai-workflows.readthedocs.io/>`_
-for the full documentation, and here for example Jupyter notebooks:
+`here for the full documentation <https://ai-workflows.readthedocs.io/>`_, and
+`here for a custom GPT <https://chatgpt.com/g/g-67586f2d154081918b6ee65b868e859e-ai-workflows-coding-assistant>`_
+that can help you use this package. If you learn best by example, see these:
 
 #. `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_:
    loading different file formats and converting them into a Markdown syntax that LLMs can understand.
@@ -21,7 +22,8 @@ for the full documentation, and here for example Jupyter notebooks:
 
 Tip: if you're not completely comfortable working in Python, use
 `GitHub Copilot in VS Code <https://code.visualstudio.com/docs/copilot/setup>`_
-or Gemini as a copilot in `Google Colab <https://colab.google/>`_.
+or Gemini as a copilot in `Google Colab <https://colab.google/>`_. Also do make use of
+`this custom GPT coding assistant <https://chatgpt.com/g/g-67586f2d154081918b6ee65b868e859e-ai-workflows-coding-assistant>`_.
 
 Installation
 ------------
@@ -188,6 +190,24 @@ Requesting a JSON response from an LLM::
 Technical notes
 ---------------
 
+Working with JSON
+^^^^^^^^^^^^^^^^^
+
+The ``ai_workflows`` package helps you to extract structured JSON content from documents and LLM responses. In all such
+cases, you have to describe the JSON format that you want with enough clarity and specificity that the system can
+reliably generate and validate responses (you typically supply this in a ``json_output_spec`` parameter). When describing
+your desired JSON, always include the field names and types, as well as detailed descriptions. For example, if you
+wanted a list of questions back::
+
+    json_output_spec = """Return correctly-formatted JSON with the following fields:
+
+    * questions (list of objects): A list of questions, each with the following fields:
+        * `question` (string): The question text
+        * `answer` (string): The supplied answer to the question"""
+
+By default, the system will use this informal, human-readable description to automatically generate a formal JSON
+schema, which it will use to validate LLM responses (and retry if needed).
+
 LLMInterface
 ^^^^^^^^^^^^
 
@@ -237,22 +257,6 @@ Key methods:
 #. `enforce_max_tokens() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.enforce_max_tokens>`_:
    Truncate a string as necessary to fit within a maximum number of tokens
 
-JSONSchemaCache
-^^^^^^^^^^^^^^^
-
-`The JSONSchemaCache class <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache>`_
-provides a simple in-memory cache for JSON schemas, so that they don't have to be
-regenerated repeatedly. It's used internally by both the ``LLMInterface`` and ``DocumentInterface`` classes, to avoid
-repeatedly generating the same schema for the same JSON output specification.
-
-Key methods:
-
-#. `get_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache.get_json_schema>`_:
-   Get a JSON schema from the cache (returns empty string if none found)
-
-#. `put_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache.put_json_schema>`_:
-   Put a JSON schema into the cache
-
 DocumentInterface
 ^^^^^^^^^^^^^^^^^
 
@@ -273,6 +277,9 @@ Key methods:
 
 #. `markdown_to_text() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.markdown_to_text>`_:
    Convert a Markdown string to plain text
+
+#. `merge_dicts() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.merge_dicts>`_:
+   Merge a list of dictionaries into a single dictionary (handy for merging the results from `x_to_json()` methods)
 
 Markdown conversion
 """""""""""""""""""
@@ -334,16 +341,37 @@ are:
 
 #. ``json_context``: a description of the file's content, to help the LLM understand what it's looking at
 #. ``json_job``: a description of the task you want the LLM to perform (e.g., extracting survey questions)
-#. ``json_output_spec``: a description of the output you expect from the LLM
+#. ``json_output_spec``: a description of the output you expect from the LLM (see discussion further above)
 #. ``json_output_schema``: optionally, a formal JSON schema to validate the LLM's output; by
    default, this will be automatically generated based on your ``json_output_spec``, but you can specify your own
    schema or explicitly pass None if you want to disable JSON validation (if JSON validation isn't disabled, the
    ``LLMInterface`` default is to retry twice if the LLM output doesn't parse or match the schema, but you can change
    this behavior by specifying the ``json_retries`` parameter in the ``LLMInterface`` constructor)
 
-The more detail you provide, the better the LLM will do at the JSON conversion.
+The more detail you provide, the better the LLM will do at the JSON conversion. If you find that things aren't working
+well, try including some few-shot examples in the ``json_output_spec`` parameter.
 
-If you find that things aren't working well, try including some few-shot examples in the ``json_output_spec`` parameter.
+Note that the JSON conversion methods return a *list* of ``dict`` objects, one for each batch or LLM call. This is
+because, for all but the shortest documents, conversion will take place in multiple batches. One ``dict``, following
+your requested format, is returned for each batch. You can process these returned dictionaries separately, merge them
+yourself, or use the handy ``DocumentInterface.merge_dicts()`` method to automatically merge them together into a single
+dictionary.
+
+JSONSchemaCache
+^^^^^^^^^^^^^^^
+
+`The JSONSchemaCache class <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache>`_
+provides a simple in-memory cache for JSON schemas, so that they don't have to be
+regenerated repeatedly. It's used internally by both the ``LLMInterface`` and ``DocumentInterface`` classes, to avoid
+repeatedly generating the same schema for the same JSON output specification.
+
+Key methods:
+
+#. `get_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache.get_json_schema>`_:
+   Get a JSON schema from the cache (returns empty string if none found)
+
+#. `put_json_schema() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.JSONSchemaCache.put_json_schema>`_:
+   Put a JSON schema into the cache
 
 Known issues
 ^^^^^^^^^^^^
@@ -414,6 +442,7 @@ To rebuild the documentation:
     a. ``cd docs``
     b. ``SPHINX_APIDOC_OPTIONS=members,show-inheritance sphinx-apidoc -o source ../src/ai_workflows --separate --force``
     c. ``make clean html``
+#. Use the `assemble-gpt-materials.ipynb` notebook to update the custom GPT coding assistant
 
 To rebuild the distribution packages:
 

@@ -139,7 +139,8 @@ class DocumentInterface:
         :param json_output_schema: JSON schema for output validation. Defaults to "", which auto-generates a validation
           schema based on the json_output_spec. If explicitly set to None, will skip JSON validation.
         :type json_output_schema: str
-        :return: List of dicts from page-level JSON results.
+        :return: List of dicts, one for each batch (e.g., for each page). Use the merge_dicts() function to combine
+          these into a single dict.
         :rtype: list[dict]
         """
 
@@ -400,7 +401,8 @@ class DocumentInterface:
         :param min_chunk_size: Minimum number of desired tokens in a chunk of Markdown processed. Default is 2000.
             Set to -1 to disable.
         :type min_chunk_size: int
-        :return: List of dicts with JSON results, one for each chunk.
+        :return: List of dicts with JSON results, one for each chunk. Use the merge_dicts() function to combine
+            these into a single dict.
         :rtype: list[dict]
         """
 
@@ -1916,8 +1918,40 @@ class UnstructuredDocumentConverter:
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        # partition document using Unstructured
-        elements: List[Element] = partition(str(file_path))
+        # pre-process .html files (to replace description list elements since Unstructured doesn't support them)
+        if file_path.suffix.lower() == '.html':
+            # create a temporary file to use instead of the original
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.html') as temp_file:
+                # load the HTML content
+                with open(file_path, 'r') as file:
+                    soup = BeautifulSoup(file, 'html.parser')
+
+                # replace all description list elements
+                while True:
+                    dls = soup.find_all('dl')
+                    if not dls:
+                        break
+
+                    for dl in dls:
+                        ul = soup.new_tag('ul')
+                        if dl.has_attr('class'):
+                            ul['class'] = dl['class']
+
+                        for tag in dl.find_all(['dt', 'dd'], recursive=False):
+                            li = soup.new_tag('li')
+                            li.extend(tag.contents)
+                            ul.append(li)
+
+                        dl.replace_with(ul)
+
+                # save the modified HTML content to temp_file
+                temp_file.write(str(soup))
+
+                # partition document using Unstructured
+                elements: List[Element] = partition(temp_file.name)
+        else:
+            # partition document using Unstructured
+            elements: List[Element] = partition(str(file_path))
 
         # process elements to DocumentElement objects
         doc_elements = []
