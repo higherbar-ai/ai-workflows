@@ -30,7 +30,7 @@ from openpyxl.worksheet.table import Table
 from openpyxl.worksheet.merge import MergedCellRange
 from unstructured.partition.auto import partition
 from unstructured.documents.elements import (
-    Text, Title, NarrativeText, ListItem, Table, Image as ImageElement, PageBreak,
+    Element, Text, Title, NarrativeText, ListItem, Table, Image as ImageElement, PageBreak,
     Header, Footer, Address
 )
 from dataclasses import dataclass
@@ -51,7 +51,8 @@ class DocumentInterface:
 
     # member variables
     via_pdf_file_extensions = [".docx", ".doc", ".pptx"]
-    docling_file_extensions = [f".{ext}" for exts in FormatToExtensions.values() for ext in exts]
+    # use Docling, except not for .html files since it doesn't preserve hyperlinks
+    docling_file_extensions = [f".{ext}" for exts in FormatToExtensions.values() for ext in exts if ext != "html"]
     pymupdf_file_extensions = [".pdf", ".xps", ".epub", ".mobi", ".fb2", ".cbz", ".svg", ".txt"]
     libreoffice_file_extensions = [
         ".odt", ".csv", ".db", ".doc", ".docx", ".dotx", ".fodp", ".fods", ".fodt", ".mml", ".odb", ".odf", ".odg",
@@ -1916,7 +1917,7 @@ class UnstructuredDocumentConverter:
             raise FileNotFoundError(f"File not found: {file_path}")
 
         # partition document using Unstructured
-        elements: List[Any] = partition(str(file_path))
+        elements: List[Element] = partition(str(file_path))
 
         # process elements to DocumentElement objects
         doc_elements = []
@@ -1932,7 +1933,12 @@ class UnstructuredDocumentConverter:
                 processed = UnstructuredDocumentConverter.DocumentElement(
                     type="text",
                     content=element.text.strip(),
-                    metadata={"coordinates": getattr(element, "coordinates", None)}
+                    metadata={
+                        "coordinates": getattr(element, "coordinates", None),
+                        "link_urls": element.metadata.link_urls,
+                        "link_texts": element.metadata.link_texts,
+                        "link_start_indexes": element.metadata.link_start_indexes
+                    }
                 )
                 doc_elements.extend([processed])
 
@@ -1954,7 +1960,12 @@ class UnstructuredDocumentConverter:
             type="heading",
             content=element.text.strip(),
             level=1,
-            metadata={"coordinates": getattr(element, "coordinates", None)}
+            metadata={
+                "coordinates": getattr(element, "coordinates", None),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
+            }
         )
 
     @staticmethod
@@ -1972,7 +1983,12 @@ class UnstructuredDocumentConverter:
             type="heading",
             content=element.text.strip(),
             level=2,
-            metadata={"coordinates": getattr(element, "coordinates", None)}
+            metadata={
+                "coordinates": getattr(element, "coordinates", None),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
+            }
         )
 
     @staticmethod
@@ -1989,7 +2005,12 @@ class UnstructuredDocumentConverter:
         return UnstructuredDocumentConverter.DocumentElement(
             type="text",
             content=element.text.strip(),
-            metadata={"coordinates": getattr(element, "coordinates", None)}
+            metadata={
+                "coordinates": getattr(element, "coordinates", None),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
+            }
         )
 
     @staticmethod
@@ -2006,7 +2027,12 @@ class UnstructuredDocumentConverter:
         return UnstructuredDocumentConverter.DocumentElement(
             type="paragraph",
             content=element.text.strip(),
-            metadata={"coordinates": getattr(element, "coordinates", None)}
+            metadata={
+                "coordinates": getattr(element, "coordinates", None),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
+            }
         )
 
     @staticmethod
@@ -2025,7 +2051,10 @@ class UnstructuredDocumentConverter:
             content=element.text.strip(),
             metadata={
                 "coordinates": getattr(element, "coordinates", None),
-                "indent_level": getattr(element, "indent_level", 0)
+                "indent_level": getattr(element, "indent_level", 0),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
             }
         )
 
@@ -2056,7 +2085,12 @@ class UnstructuredDocumentConverter:
         return UnstructuredDocumentConverter.DocumentElement(
             type="table",
             content='\n'.join(md_table),
-            metadata={"coordinates": getattr(element, "coordinates", None)}
+            metadata={
+                "coordinates": getattr(element, "coordinates", None),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
+            }
         )
 
     @staticmethod
@@ -2076,7 +2110,10 @@ class UnstructuredDocumentConverter:
             content="![Image]",
             metadata={
                 "coordinates": getattr(element, "coordinates", None),
-                "image_data": getattr(element, "image_data", None)
+                "image_data": getattr(element, "image_data", None),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
             }
         )
 
@@ -2111,7 +2148,12 @@ class UnstructuredDocumentConverter:
         return UnstructuredDocumentConverter.DocumentElement(
             type="footer",
             content=element.text.strip(),
-            metadata={"coordinates": getattr(element, "coordinates", None)}
+            metadata={
+                "coordinates": getattr(element, "coordinates", None),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
+            }
         )
 
     @staticmethod
@@ -2128,7 +2170,12 @@ class UnstructuredDocumentConverter:
         return UnstructuredDocumentConverter.DocumentElement(
             type="address",
             content=element.text.strip(),
-            metadata={"coordinates": getattr(element, "coordinates", None)}
+            metadata={
+                "coordinates": getattr(element, "coordinates", None),
+                "link_urls": element.metadata.link_urls,
+                "link_texts": element.metadata.link_texts,
+                "link_start_indexes": element.metadata.link_start_indexes
+            }
         )
 
     def _elements_to_markdown(self, elements: List[DocumentElement]) -> str:
@@ -2151,16 +2198,16 @@ class UnstructuredDocumentConverter:
 
                 # add heading
                 if self.heading_style == "atx":
-                    markdown_parts.append(f"{'#' * element.level} {element.content}")
+                    markdown_parts.append(f"{'#' * element.level} {self.content_with_links(element)}")
                 else:
-                    markdown_parts.append(element.content)
-                    markdown_parts.append('=' if element.level == 1 else '-' * len(element.content))
+                    markdown_parts.append(self.content_with_links(element))
+                    markdown_parts.append('=' if element.level == 1 else '-' * len(self.content_with_links(element)))
             elif element.type == "paragraph":
                 # clear any active lists
                 list_stack = []
 
                 # add paragraph content
-                markdown_parts.append(element.content)
+                markdown_parts.append(self.content_with_links(element))
             elif element.type == "list_item":
                 indent_level = element.metadata.get("indent_level", 0)
                 # adjust list stack
@@ -2171,37 +2218,81 @@ class UnstructuredDocumentConverter:
 
                 # add list item
                 prefix = "  " * indent_level + "* "
-                markdown_parts.append(f"{prefix}{element.content}")
+                markdown_parts.append(f"{prefix}{self.content_with_links(element)}")
             elif element.type == "table":
                 # clear any active lists
                 list_stack = []
 
                 # add table content
-                markdown_parts.append(element.content)
+                markdown_parts.append(self.content_with_links(element))
             elif element.type == "image":
                 # clear any active lists
                 list_stack = []
 
                 # add image content
-                markdown_parts.append(element.content)
+                markdown_parts.append(self.content_with_links(element))
             elif element.type == "page_break":
                 # add page break
                 markdown_parts.append("\n---\n")
             elif element.type == "footer":
                 # add footer content
-                markdown_parts.append(f"\n---\n{element.content}\n")
+                markdown_parts.append(f"\n---\n{self.content_with_links(element)}\n")
             elif element.type == "address":
                 # add address content
-                markdown_parts.append(f"> {element.content}")
+                markdown_parts.append(f"> {self.content_with_links(element)}")
             else:
                 # add any other content as-is
-                markdown_parts.append(element.content)
+                markdown_parts.append(self.content_with_links(element))
 
             # add spacing between elements
             markdown_parts.append("")
 
         # return combined markdown content
         return "\n".join(markdown_parts)
+
+    @staticmethod
+    def content_with_links(element: DocumentElement) -> str:
+        """
+        Convert content to Markdown with links as needed.
+
+        :param element: DocumentElement object.
+        :type element: DocumentElement
+        :return: String with content, including hyperlinks.
+        :rtype: str
+        """
+
+        # provisional return value is just the content
+        retval = element.content
+
+        # add hyperlinks, if present
+        if ("link_urls" in element.metadata and element.metadata["link_urls"] and "link_texts" in element.metadata
+                and element.metadata["link_texts"]):
+            # see if we have start indexes for the hyperlinks
+            if "link_start_indexes" in element.metadata and element.metadata["link_start_indexes"]:
+                # combine link data and sort by start index in descending order
+                links = sorted(
+                    zip(element.metadata["link_start_indexes"],
+                        element.metadata["link_texts"],
+                        element.metadata["link_urls"]),
+                    reverse=True
+                )
+                # replace each link text with Markdown link syntax
+                for start_index, link_text, link_url in links:
+                    # only replace absolute http and mailto links for now
+                    if link_url.startswith("https:") or link_url.startswith("http:") or link_url.startswith("mailto:"):
+                        end_index = start_index + len(link_text)
+                        markdown_link = f"[{link_text}]({link_url})"
+                        retval = retval[:start_index] + markdown_link + retval[end_index:]
+            else:
+                # if no start indexes, just use blind text replacement (which is error-prone)
+                for link_text, link_url in zip(element.metadata["link_texts"], element.metadata["link_urls"]):
+                    if link_url.startswith("https:") or link_url.startswith("http:") or link_url.startswith("mailto:"):
+                        # replace the link text with Markdown hyperlink syntax only if it's not already hyperlinked
+                        markdown_link = f"[{link_text}]({link_url})"
+                        if not re.search(rf'\[{link_text}]\([^)]+\)', retval):
+                            retval = retval.replace(link_text, markdown_link)
+
+        return retval
 
 
 class MarkdownSplitter:
