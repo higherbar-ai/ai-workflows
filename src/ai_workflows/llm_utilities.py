@@ -222,7 +222,8 @@ class LLMInterface:
 
             # invoke LLM and parse+validate JSON response
             result = self.get_llm_response(prompt,
-                                           bypass_history_and_system_prompt=bypass_history_and_system_prompt)
+                                           bypass_history_and_system_prompt=bypass_history_and_system_prompt,
+                                           json_mode=True)
             json_objects = self.extract_json(result)
             validation_error = self._json_validation_error(json_objects, json_validation_schema)
 
@@ -262,7 +263,8 @@ class LLMInterface:
 
                     # execute the retry
                     result = self.get_llm_response(retry_prompt,
-                                                   bypass_history_and_system_prompt=bypass_history_and_system_prompt)
+                                                   bypass_history_and_system_prompt=bypass_history_and_system_prompt,
+                                                   json_mode=True)
                     json_objects = self.extract_json(result)
                     validation_error = self._json_validation_error(json_objects, json_validation_schema)
                     retries += 1
@@ -305,7 +307,8 @@ class LLMInterface:
         try:
             # invoke LLM and parse+validate JSON response
             result = await self.a_get_llm_response(prompt,
-                                                   bypass_history_and_system_prompt=bypass_history_and_system_prompt)
+                                                   bypass_history_and_system_prompt=bypass_history_and_system_prompt,
+                                                   json_mode=True)
             json_objects = self.extract_json(result)
             validation_error = self._json_validation_error(json_objects, json_validation_schema)
 
@@ -345,7 +348,8 @@ class LLMInterface:
 
                     # execute the retry
                     result = await self.a_get_llm_response(
-                        retry_prompt, bypass_history_and_system_prompt=bypass_history_and_system_prompt)
+                        retry_prompt, bypass_history_and_system_prompt=bypass_history_and_system_prompt,
+                        json_mode=True)
                     json_objects = self.extract_json(result)
                     validation_error = self._json_validation_error(json_objects, json_validation_schema)
                     retries += 1
@@ -365,7 +369,8 @@ class LLMInterface:
         return json_objects[0] if not validation_error else None, result, validation_error
 
     @traceable(run_type="chain", name="ai_workflows.get_llm_response")
-    def get_llm_response(self, prompt: str | list, bypass_history_and_system_prompt=False) -> str:
+    def get_llm_response(self, prompt: str | list, bypass_history_and_system_prompt=False,
+                         json_mode: bool = False) -> str:
         """
         Call out to LLM for a response to a prompt (synchronous version).
 
@@ -373,6 +378,8 @@ class LLMInterface:
         :type prompt: str | list
         :param bypass_history_and_system_prompt: Whether to bypass the history and system prompt. Default is False.
         :type bypass_history_and_system_prompt: bool
+        :param json_mode: Whether to use model's "JSON mode" (if available). Default is False.
+        :type json_mode: bool
         :return: Content of the LLM response.
         :rtype: str
         """
@@ -390,7 +397,8 @@ class LLMInterface:
         # execute LLM evaluation, with appropriate parameters, depending on the LLM type
         if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
             result = self._llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
-                                    temperature=self.temperature, response_format={"type": "json_object"},
+                                    temperature=self.temperature,
+                                    response_format={"type": "json_object"} if json_mode else None,
                                     no_system_prompt=bypass_history_and_system_prompt)
             # extract the content from the response
             retval = result.choices[0].message.content
@@ -410,7 +418,8 @@ class LLMInterface:
         return retval
 
     @traceable(run_type="chain", name="ai_workflows.a_get_llm_response")
-    async def a_get_llm_response(self, prompt: str | list, bypass_history_and_system_prompt=False) -> str:
+    async def a_get_llm_response(self, prompt: str | list, bypass_history_and_system_prompt=False,
+                                 json_mode: bool = False) -> str:
         """
         Call out to LLM for a response to a prompt (async version).
 
@@ -418,6 +427,8 @@ class LLMInterface:
         :type prompt: str | list
         :param bypass_history_and_system_prompt: Whether to bypass the history and system prompt. Default is False.
         :type bypass_history_and_system_prompt: bool
+        :param json_mode: Whether to use model's "JSON mode" (if available). Default is False.
+        :type json_mode: bool
         :return: Content of the LLM response.
         :rtype: str
         """
@@ -435,7 +446,8 @@ class LLMInterface:
         # execute LLM evaluation, with appropriate parameters, depending on the LLM type
         if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
             result = await self._a_llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
-                                            temperature=self.temperature, response_format={"type": "json_object"},
+                                            temperature=self.temperature,
+                                            response_format={"type": "json_object"} if json_mode else None,
                                             no_system_prompt=bypass_history_and_system_prompt)
             # extract the content from the response
             retval = result.choices[0].message.content

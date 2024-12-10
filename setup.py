@@ -20,7 +20,7 @@ with open('README.rst') as file:
 
 setup(
     name='py-ai-workflows',
-    version='0.21.0',
+    version='0.22.0',
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
     python_requires='>=3.10',
