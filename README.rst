@@ -201,7 +201,7 @@ wanted a list of questions back::
 
     json_output_spec = """Return correctly-formatted JSON with the following fields:
 
-    * questions (list of objects): A list of questions, each with the following fields:
+    * `questions` (list of objects): A list of questions, each with the following fields:
         * `question` (string): The question text
         * `answer` (string): The supplied answer to the question"""
 
@@ -279,7 +279,7 @@ Key methods:
    Convert a Markdown string to plain text
 
 #. `merge_dicts() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.merge_dicts>`_:
-   Merge a list of dictionaries into a single dictionary (handy for merging the results from `x_to_json()` methods)
+   Merge a list of dictionaries into a single dictionary (handy for merging the results from ``x_to_json()`` methods)
 
 Markdown conversion
 """""""""""""""""""
@@ -319,8 +319,10 @@ Otherwise, we convert files to Markdown using one of the following methods (in o
 JSON conversion
 """""""""""""""
 
-You can convert from Markdown to JSON using the `DocumentInterface.markdown_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.markdown_to_json>`_
-method, or you can convert files directly to JSON using the `DocumentInterface.convert_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.convert_to_json>`_
+You can convert from Markdown to JSON using the
+`DocumentInterface.markdown_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.markdown_to_json>`_
+method, or you can convert files directly to JSON using the
+`DocumentInterface.convert_to_json() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.document_utilities.html#ai_workflows.document_utilities.DocumentInterface.convert_to_json>`_
 method. The latter method will most often convert to Markdown first and then to JSON, but it will convert straight to
 JSON with a page-by-page approach if:
 
@@ -376,8 +378,8 @@ Key methods:
 Known issues
 ^^^^^^^^^^^^
 
-See `the GitHub issues page <https://github.com/higherbar-ai/ai-workflows/labels/bug>`_ for the most up-to-date list of
-known issues.
+See `bugs logged in GitHub issues <https://github.com/higherbar-ai/ai-workflows/labels/bug>`_
+for the most up-to-date list of known issues.
 
 ImportError: libGL.so.1: cannot open shared object file
 """""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -442,7 +444,7 @@ To rebuild the documentation:
     a. ``cd docs``
     b. ``SPHINX_APIDOC_OPTIONS=members,show-inheritance sphinx-apidoc -o source ../src/ai_workflows --separate --force``
     c. ``make clean html``
-#. Use the `assemble-gpt-materials.ipynb` notebook to update the custom GPT coding assistant
+#. Use the ``assemble-gpt-materials.ipynb`` notebook to update the custom GPT coding assistant
 
 To rebuild the distribution packages:
 
