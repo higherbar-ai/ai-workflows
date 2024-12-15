@@ -15,6 +15,10 @@ that can help you use this package. If you learn best by example, see these:
 
 #. `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_:
    loading different file formats and converting them into a Markdown syntax that LLMs can understand.
+#. `example-doc-extraction.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-extraction.ipynb>`_:
+   extracting structured data from unstructured documents (edit notebook to customize).
+#. `example-doc-extraction-templated.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-extraction-templated.ipynb>`_:
+   extracting structured data from unstructured documents (supply an Excel template to customize).
 #. `example-qual-analysis-1.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-qual-analysis-1.ipynb>`_:
    a more realistic workflow example that performs a simple qualitative analysis on a set of interview transcripts.
 #. `example-surveyeval-lite.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-surveyeval-lite.ipynb>`_:
@@ -119,6 +123,11 @@ Here are the basics:
 #. The `example-doc-conversion.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-conversion.ipynb>`_
    notebook provides a simple example of how to use the ``document_utilities``
    module to convert files to Markdown format, in either Google Colab or a local environment.
+#. The `example-doc-extraction.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-extraction.ipynb>`_
+   notebook provides an example of how to extract structured data from unstructured documents.
+#. The `example-doc-extraction-templated.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-doc-extraction-templated.ipynb>`_
+   notebook provides an easier-to-customize version of the above: you supply an Excel template with your data extraction
+   needs.
 #. The `example-qual-analysis-1.ipynb <https://github.com/higherbar-ai/ai-workflows/blob/main/src/example-qual-analysis-1.ipynb>`_
    notebook provides a more realistic workflow example that uses both the ``document_utilities`` and the
    ``llm_utilities`` modules to perform a simple qualitative analysis on a set of interview transcripts. It also works
@@ -131,8 +140,8 @@ Here are the basics:
    notebook provides a basic set-up for testing Markdown conversion methods (LLM-assisted
    vs. not-LLM-assisted). At the moment, this notebook only works in a local environment.
 
-Examples
-^^^^^^^^
+Example snippets
+^^^^^^^^^^^^^^^^
 
 Converting a file to Markdown format (without LLM assistance)::
 
