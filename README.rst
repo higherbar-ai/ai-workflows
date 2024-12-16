@@ -266,6 +266,8 @@ Key methods:
 #. `enforce_max_tokens() <https://ai-workflows.readthedocs.io/en/latest/ai_workflows.llm_utilities.html#ai_workflows.llm_utilities.LLMInterface.enforce_max_tokens>`_:
    Truncate a string as necessary to fit within a maximum number of tokens
 
+If you don't have an API key for an AI provider yet, `see here to learn what that is and how to get one <https://www.linkedin.com/pulse/those-genai-api-keys-christopher-robert-l5rie/>`_.
+
 DocumentInterface
 ^^^^^^^^^^^^^^^^^
 
