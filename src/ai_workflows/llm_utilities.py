@@ -519,6 +519,11 @@ class LLMInterface:
         # add timeout to kwargs
         kwargs['timeout'] = self.total_response_timeout_seconds
 
+        # adjust max_tokens for OpenAI o1 models
+        if ((isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI))
+                and 'o1' in self.model and 'max_tokens' in kwargs):
+            kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
+
         # handle no_system_prompt flag
         no_system_prompt = False
         if 'no_system_prompt' in kwargs:
@@ -599,6 +604,11 @@ class LLMInterface:
 
         # add timeout to kwargs
         kwargs['timeout'] = self.total_response_timeout_seconds
+
+        # adjust max_tokens for OpenAI o1 models
+        if ((isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI))
+                and 'o1' in self.model and 'max_tokens' in kwargs):
+            kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
 
         # handle no_system_prompt flag
         no_system_prompt = False
