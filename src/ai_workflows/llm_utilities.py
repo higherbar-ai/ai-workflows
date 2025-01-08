@@ -396,6 +396,10 @@ class LLMInterface:
 
         # execute LLM evaluation, with appropriate parameters, depending on the LLM type
         if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+            if json_mode and self.model == "o1-preview":
+                # (o1-preview doesn't support JSON mode)
+                json_mode = False
+
             result = self._llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
                                     temperature=self.temperature,
                                     response_format={"type": "json_object"} if json_mode else None,
@@ -445,6 +449,10 @@ class LLMInterface:
 
         # execute LLM evaluation, with appropriate parameters, depending on the LLM type
         if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
+            if json_mode and self.model == "o1-preview":
+                # (o1-preview doesn't support JSON mode)
+                json_mode = False
+
             result = await self._a_llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
                                             temperature=self.temperature,
                                             response_format={"type": "json_object"} if json_mode else None,
@@ -771,7 +779,8 @@ class LLMInterface:
 
         # Anthropic system prompts are passed separately; here, we'll use the "user" role if it's an Anthropic model
         retval = {
-            "role": "user" if isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock) else "system",
+            "role": "user" if isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock) else (
+                "developer" if "o1" in self.model else "system"),
             "content": [
                 {
                     "type": "text",
