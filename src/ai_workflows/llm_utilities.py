@@ -778,9 +778,10 @@ class LLMInterface:
         """
 
         # Anthropic system prompts are passed separately; here, we'll use the "user" role if it's an Anthropic model
+        # will also use "user" role for o1-series models, until they add comprehensive support for the "developer" role
         retval = {
-            "role": "user" if isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock) else (
-                "developer" if "o1" in self.model else "system"),
+            "role": "user" if isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock)
+                              or "o1" in self.model else "system",
             "content": [
                 {
                     "type": "text",
