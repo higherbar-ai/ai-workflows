@@ -20,15 +20,15 @@ with open('README.rst') as file:
 
 setup(
     name='py-ai-workflows',
-    version='0.26.0',
+    version='0.27.0',
     packages=find_packages(where='src'),
     package_dir={'': 'src'},
     python_requires='>=3.10',
     install_requires=[
         'openai>=1.56.1,<2.0',
-        'anthropic[bedrock]',
+        'anthropic[bedrock]~=0.52.2',
         'tiktoken',
-        'langsmith>=0.1.63,<0.2',
+        'langsmith~=0.3.43',
         'tenacity',
         'Pillow',
         'jsonschema',

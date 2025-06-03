@@ -627,7 +627,7 @@ class PDFDocumentConverter:
         return [image for image, _ in images_with_text]
 
     @staticmethod
-    def pdf_to_images_and_text(pdf_path: str, dpi: int = 150) -> list[(Image.Image, str)]:
+    def pdf_to_images_and_text(pdf_path: str, dpi: int = 150) -> list[tuple[Image.Image, str]]:
         """
         Convert a PDF to a list of PIL Images, each with extracted text.
 
@@ -636,7 +636,7 @@ class PDFDocumentConverter:
         :param dpi: DPI to use for rendering the PDF. Default is 150, which is generally plenty for LLM applications.
         :type dpi: int
         :return: List of tuples, one for each page, each with an image and the text extracted from that page.
-        :rtype: list[(Image.Image, str)]
+        :rtype: list[tuple[Image.Image, str]]
         """
 
         # open PDF
@@ -872,9 +872,12 @@ class PDFDocumentConverter:
                 # (could be smarter about this, only adding paragraph breaks where it looks appropriate — but it's
                 # not clear that over-breaking will overly affect downstream uses)
                 markdown_output += content.strip() + '\n\n'
-            else:
+            elif element_type:
                 # add other types of elements with labels and more visual separation
                 markdown_output += f'***\n\n{element_type.upper()}:\n\n{content.strip()}\n\n***\n\n'
+            else:
+                # add other types of elements with labels and more visual separation
+                markdown_output += f'***\n\n{content.strip()}\n\n***\n\n'
 
         # return assembled markdown output with extra newlines at the end stripped out
         return markdown_output.strip()

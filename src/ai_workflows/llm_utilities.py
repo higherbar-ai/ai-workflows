@@ -14,7 +14,7 @@
 
 """Utilities for interacting with LLMs in AI workflows."""
 
-from anthropic.types import Message, RawMessageStreamEvent
+from anthropic.types import Message, MessageParam, RawMessageStreamEvent
 from openai import OpenAI, AsyncOpenAI, AzureOpenAI, AsyncAzureOpenAI, AsyncStream
 from openai import APITimeoutError, APIError, APIConnectionError, RateLimitError, InternalServerError
 from anthropic import Anthropic, AsyncAnthropic, AnthropicBedrock, AsyncAnthropicBedrock
@@ -661,8 +661,8 @@ class LLMInterface:
             encoding = tiktoken.encoding_for_model(self.model)
             return len(encoding.encode(text))
         else:
-            count = self.llm.beta.messages.count_tokens(model=self.model,
-                                                        messages=[{"role": "user", "content": text}])
+            count = self.llm.messages.count_tokens(model=self.model,
+                                                   messages=[MessageParam(role="user", content=text)])
             return count.input_tokens
 
     async def a_count_tokens(self, text: str) -> int:
@@ -681,7 +681,7 @@ class LLMInterface:
             return len(encoding.encode(text))
         else:
             count = await self.a_llm.beta.messages.count_tokens(model=self.model,
-                                                                messages=[{"role": "user", "content": text}])
+                                                                messages=[MessageParam(role="user", content=text)])
             return count.input_tokens
 
     def enforce_max_tokens(self, text: str, max_tokens: int) -> str:
@@ -945,12 +945,17 @@ class LLMInterface:
         while True:
             # save the image with current DPI
             img_byte_arr = io.BytesIO()
-            save_kwargs = {
-                "format": output_format,
-                "optimize": True
-            }
             if max_bytes and dpi:
-                save_kwargs["dpi"] = (dpi, dpi)
+                save_kwargs = {
+                    "format": output_format,
+                    "optimize": True,
+                    "dpi": (dpi, dpi)
+                }
+            else:
+                save_kwargs = {
+                    "format": output_format,
+                    "optimize": True
+                }
             image.save(img_byte_arr, **save_kwargs)
             current_bytes = img_byte_arr.getvalue()
 
