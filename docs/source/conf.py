@@ -14,9 +14,9 @@ sys.path.insert(0, os.path.abspath('../../src/ai_workflows'))
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'ai-workflows'
-copyright = '2024, Higher Bar AI, PBC'
+copyright = '2025, Higher Bar AI, PBC'
 author = 'Higher Bar AI, PBC'
-release = '0.26.0'
+release = '0.27.0'
 
 
 # -- General configuration ---------------------------------------------------
