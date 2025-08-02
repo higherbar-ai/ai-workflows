@@ -658,7 +658,11 @@ class LLMInterface:
 
         # use appropriate token-counting method depending on the LLM provider
         if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
-            encoding = tiktoken.encoding_for_model(self.model)
+            try:
+                encoding = tiktoken.encoding_for_model(self.model)
+            except KeyError:
+                # automatically fall back to gpt-4o tokens if the model is not supported
+                encoding = tiktoken.encoding_for_model("gpt-4o")
             return len(encoding.encode(text))
         else:
             count = self.llm.messages.count_tokens(model=self.model,
@@ -677,7 +681,11 @@ class LLMInterface:
 
         # use appropriate token-counting method depending on the LLM provider
         if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
-            encoding = tiktoken.encoding_for_model(self.model)
+            try:
+                encoding = tiktoken.encoding_for_model(self.model)
+            except KeyError:
+                # automatically fall back to gpt-4o tokens if the model is not supported
+                encoding = tiktoken.encoding_for_model("gpt-4o")
             return len(encoding.encode(text))
         else:
             count = await self.a_llm.beta.messages.count_tokens(model=self.model,
@@ -704,7 +712,11 @@ class LLMInterface:
         # otherwise, truncate using different methods depending on the LLM provider
         if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
             # for OpenAI, can convert to tokens, truncate, then convert back
-            encoding = tiktoken.encoding_for_model(self.model)
+            try:
+                encoding = tiktoken.encoding_for_model(self.model)
+            except KeyError:
+                # automatically fall back to gpt-4o tokens if the model is not supported
+                encoding = tiktoken.encoding_for_model("gpt-4o")
             tokens = list(encoding.encode(text))[:max_tokens]
             return encoding.decode(tokens)
         else:
@@ -740,7 +752,11 @@ class LLMInterface:
         # otherwise, truncate using different methods depending on the LLM provider
         if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
             # for OpenAI, can convert to tokens, truncate, then convert back
-            encoding = tiktoken.encoding_for_model(self.model)
+            try:
+                encoding = tiktoken.encoding_for_model(self.model)
+            except KeyError:
+                # automatically fall back to gpt-4o tokens if the model is not supported
+                encoding = tiktoken.encoding_for_model("gpt-4o")
             tokens = list(encoding.encode(text))[:max_tokens]
             return encoding.decode(tokens)
         else:
