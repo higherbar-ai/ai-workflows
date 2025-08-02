@@ -51,8 +51,9 @@ class DocumentInterface:
 
     # member variables
     via_pdf_file_extensions = [".docx", ".doc", ".pptx"]
-    # use Docling, except not for .html files since it doesn't preserve hyperlinks
-    docling_file_extensions = [f".{ext}" for exts in FormatToExtensions.values() for ext in exts if ext != "html"]
+    # use Docling, except not for .html files since it doesn't preserve hyperlinks and not .txt because it's broken
+    docling_file_extensions = [f".{ext}" for exts in FormatToExtensions.values() for ext in exts
+                               if ext not in ["html", "txt"]]
     pymupdf_file_extensions = [".pdf", ".xps", ".epub", ".mobi", ".fb2", ".cbz", ".svg", ".txt"]
     libreoffice_file_extensions = [
         ".odt", ".csv", ".db", ".doc", ".docx", ".dotx", ".fodp", ".fods", ".fodt", ".mml", ".odb", ".odf", ".odg",
