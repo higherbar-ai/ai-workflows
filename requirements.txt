@@ -1,4 +1,4 @@
-openai>=1.56.1,<2.0
+openai>=1.99.0,<2.0
 anthropic[bedrock]~=0.52.2
 tiktoken
 langsmith~=0.3.43
