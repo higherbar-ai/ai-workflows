@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.abspath('../../src/ai_workflows'))
 project = 'ai-workflows'
 copyright = '2025, Higher Bar AI, PBC'
 author = 'Higher Bar AI, PBC'
-release = '0.28.0'
+release = '0.29.0'
 
 
 # -- General configuration ---------------------------------------------------

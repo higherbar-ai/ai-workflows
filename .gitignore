@@ -123,3 +123,4 @@ Temporary Items
 
 # Sphinx documentation
 docs/build/
+.idea/cody_project_settings.xml

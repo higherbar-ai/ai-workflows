@@ -49,7 +49,8 @@ class LLMInterface:
     a_llm: AsyncOpenAI | AsyncAzureOpenAI | AsyncAnthropic | AsyncAnthropicBedrock | None
     model: str
     json_retries: int = 2
-    max_tokens: int = 4096
+    max_tokens: int = -1
+    reasoning_effort: str = None
     using_langsmith: bool = False
     system_prompt = ""
     maintain_history = False
@@ -62,8 +63,8 @@ class LLMInterface:
                  langsmith_project: str = 'ai_workflows', langsmith_endpoint: str = 'https://api.smith.langchain.com',
                  json_retries: int = 2, anthropic_api_key: str = None, anthropic_model: str = None,
                  bedrock_model: str = None, bedrock_region: str = "us-east-1", bedrock_aws_profile: str = None,
-                 max_tokens: int = 4096, system_prompt: str = "", maintain_history: bool = False,
-                 starting_chat_history: list[tuple] = None):
+                 max_tokens: int = -1, reasoning_effort: str = None, system_prompt: str = "", 
+                 maintain_history: bool = False, starting_chat_history: list[tuple] = None):
         """
         Initialize the LLM interface for LLM interactions.
 
@@ -109,8 +110,12 @@ class LLMInterface:
         :type bedrock_region: str
         :param bedrock_aws_profile: AWS profile for Bedrock access. Default is None.
         :type bedrock_aws_profile: str
-        :param max_tokens: Maximum tokens for LLM responses. Default is 4096.
+        :param max_tokens: Maximum tokens for LLM responses. Default is -1, which sets to 50000 for reasoning 
+            models (GPT-5, o1, o3, o4-mini) or 16000 for other models. Specify a value to override.
         :type max_tokens: int
+        :param reasoning_effort: Reasoning effort level for reasoning models ('low', 'medium', 'high'). 
+            Default is None, which sets to 'low' for reasoning models. Ignored for non-reasoning models.
+        :type reasoning_effort: str
         :param system_prompt: System prompt to add to all LLM calls. Default is "".
         :type system_prompt: str
         :param maintain_history: Whether to maintain a history of LLM interactions (and include the history in each call
@@ -135,9 +140,20 @@ class LLMInterface:
         self.number_of_retries = number_of_retries
         self.seconds_between_retries = seconds_between_retries
         self.json_retries = json_retries
-        self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
         self.system_prompt = system_prompt
         self.maintain_history = maintain_history
+        
+        # Set max_tokens based on model type if user didn't specify
+        if max_tokens == -1:  # User left at default
+            # Determine which model we'll be using
+            model_to_check = openai_model or anthropic_model or bedrock_model or azure_api_engine
+            if model_to_check and self._is_reasoning_model(model_to_check):
+                self.max_tokens = 50000  # Higher default for reasoning models
+            else:
+                self.max_tokens = 16000  # Higher default for all other models
+        else:
+            self.max_tokens = max_tokens  # User explicitly specified, respect it
 
         # initialize LLM access
         if openai_api_key:
@@ -403,6 +419,7 @@ class LLMInterface:
             result = self._llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
                                     temperature=self.temperature,
                                     response_format={"type": "json_object"} if json_mode else None,
+                                    reasoning_effort=self.reasoning_effort,
                                     no_system_prompt=bypass_history_and_system_prompt)
             # extract the content from the response
             retval = result.choices[0].message.content
@@ -456,6 +473,7 @@ class LLMInterface:
             result = await self._a_llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
                                             temperature=self.temperature,
                                             response_format={"type": "json_object"} if json_mode else None,
+                                            reasoning_effort=self.reasoning_effort,
                                             no_system_prompt=bypass_history_and_system_prompt)
             # extract the content from the response
             retval = result.choices[0].message.content
@@ -527,10 +545,26 @@ class LLMInterface:
         # add timeout to kwargs
         kwargs['timeout'] = self.total_response_timeout_seconds
 
-        # adjust max_tokens for OpenAI o1 models
-        if ((isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI))
-                and 'o1' in self.model and 'max_tokens' in kwargs):
-            kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
+        # adjust parameters for OpenAI reasoning models (o1, o3, GPT-5)
+        if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
+            if self._is_reasoning_model(self.model):
+                # Convert max_tokens to max_completion_tokens
+                if 'max_tokens' in kwargs:
+                    kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
+                
+                # Add reasoning effort parameter (default to low only if not specified)
+                if 'reasoning_effort' not in kwargs or kwargs.get('reasoning_effort') is None:
+                    kwargs['reasoning_effort'] = self.reasoning_effort or 'low'
+                
+                # Remove all unsupported parameters for reasoning models
+                unsupported_params = ['temperature', 'top_p', 'presence_penalty', 
+                                    'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias']
+                for param in unsupported_params:
+                    kwargs.pop(param, None)
+            else:
+                # Remove reasoning_effort from non-reasoning models
+                if 'reasoning_effort' in kwargs:
+                    kwargs.pop('reasoning_effort')
 
         # handle no_system_prompt flag
         no_system_prompt = False
@@ -613,10 +647,22 @@ class LLMInterface:
         # add timeout to kwargs
         kwargs['timeout'] = self.total_response_timeout_seconds
 
-        # adjust max_tokens for OpenAI o1 models
-        if ((isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI))
-                and 'o1' in self.model and 'max_tokens' in kwargs):
-            kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
+        # adjust parameters for OpenAI reasoning models (o1, o3, GPT-5)
+        if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
+            if self._is_reasoning_model(self.model):
+                # Convert max_tokens to max_completion_tokens
+                if 'max_tokens' in kwargs:
+                    kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
+                
+                # Add reasoning effort parameter (default to low only if not specified)
+                if 'reasoning_effort' not in kwargs or kwargs.get('reasoning_effort') is None:
+                    kwargs['reasoning_effort'] = self.reasoning_effort or 'low'
+                
+                # Remove all unsupported parameters for reasoning models
+                unsupported_params = ['temperature', 'top_p', 'presence_penalty', 
+                                    'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias']
+                for param in unsupported_params:
+                    kwargs.pop(param, None)
 
         # handle no_system_prompt flag
         no_system_prompt = False
@@ -1331,6 +1377,49 @@ The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
 
         # if we made it this far, that means the JSON is valid
         return ""
+
+    @staticmethod
+    def _is_reasoning_model(model_name: str) -> bool:
+        """
+        Detect if model requires max_completion_tokens instead of max_tokens.
+        
+        :param model_name: Name of the model to check.
+        :type model_name: str
+        :return: True if model uses reasoning and requires max_completion_tokens.
+        :rtype: bool
+        """
+
+        if not model_name:
+            return False
+            
+        model_lower = model_name.lower()
+        reasoning_models = [
+            'gpt-5', 'gpt-5-mini', 'gpt-5-nano',
+            'o1', 'o1-preview', 'o1-mini',
+            'o3', 'o3-mini', 'o3-pro',
+            'o4-mini'
+        ]
+        return any(reasoning_model in model_lower for reasoning_model in reasoning_models)
+
+    @staticmethod
+    def _supports_temperature(model_name: str) -> bool:
+        """
+    
+        Check if model supports temperature and other sampling parameters.
+        
+        All reasoning models (o1, o3, GPT-5) don't support: temperature, top_p, 
+        presence_penalty, frequency_penalty, logprobs, top_logprobs, logit_bias.
+        
+        :param model_name: Name of the model to check.
+        :type model_name: str
+        :return: True if model supports temperature parameter.
+        :rtype: bool
+        """
+        if not model_name:
+            return True
+            
+        # All reasoning models don't support sampling parameters
+        return not LLMInterface._is_reasoning_model(model_name)
 
 
 class JSONSchemaCache:
