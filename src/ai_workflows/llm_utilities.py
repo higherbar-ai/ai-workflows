@@ -545,27 +545,10 @@ class LLMInterface:
         # add timeout to kwargs
         kwargs['timeout'] = self.total_response_timeout_seconds
 
-        # adjust parameters for OpenAI reasoning models (o1, o3, GPT-5)
+        # normalize OpenAI/Azure parameters for reasoning vs. non-reasoning models
         if isinstance(self.llm, OpenAI) or isinstance(self.llm, AzureOpenAI):
-            if self._is_reasoning_model(self.model):
-                # Convert max_tokens to max_completion_tokens
-                if 'max_tokens' in kwargs:
-                    kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
+            self._normalize_openai_params(kwargs)
                 
-                # Add reasoning effort parameter (default to low only if not specified)
-                if 'reasoning_effort' not in kwargs or kwargs.get('reasoning_effort') is None:
-                    kwargs['reasoning_effort'] = self.reasoning_effort or 'low'
-                
-                # Remove all unsupported parameters for reasoning models
-                unsupported_params = ['temperature', 'top_p', 'presence_penalty', 
-                                    'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias']
-                for param in unsupported_params:
-                    kwargs.pop(param, None)
-            else:
-                # Remove reasoning_effort from non-reasoning models
-                if 'reasoning_effort' in kwargs:
-                    kwargs.pop('reasoning_effort')
-
         # handle no_system_prompt flag
         no_system_prompt = False
         if 'no_system_prompt' in kwargs:
@@ -647,22 +630,9 @@ class LLMInterface:
         # add timeout to kwargs
         kwargs['timeout'] = self.total_response_timeout_seconds
 
-        # adjust parameters for OpenAI reasoning models (o1, o3, GPT-5)
+        # normalize OpenAI/Azure parameters for reasoning vs non-reasoning models
         if isinstance(self.a_llm, AsyncOpenAI) or isinstance(self.a_llm, AsyncAzureOpenAI):
-            if self._is_reasoning_model(self.model):
-                # Convert max_tokens to max_completion_tokens
-                if 'max_tokens' in kwargs:
-                    kwargs['max_completion_tokens'] = kwargs.pop('max_tokens')
-                
-                # Add reasoning effort parameter (default to low only if not specified)
-                if 'reasoning_effort' not in kwargs or kwargs.get('reasoning_effort') is None:
-                    kwargs['reasoning_effort'] = self.reasoning_effort or 'low'
-                
-                # Remove all unsupported parameters for reasoning models
-                unsupported_params = ['temperature', 'top_p', 'presence_penalty', 
-                                    'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias']
-                for param in unsupported_params:
-                    kwargs.pop(param, None)
+            self._normalize_openai_params(kwargs)
 
         # handle no_system_prompt flag
         no_system_prompt = False
@@ -1381,45 +1351,57 @@ The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
     @staticmethod
     def _is_reasoning_model(model_name: str) -> bool:
         """
-        Detect if model requires max_completion_tokens instead of max_tokens.
+        Detect if an OpenAI model is a reasoning model.
         
         :param model_name: Name of the model to check.
         :type model_name: str
-        :return: True if model uses reasoning and requires max_completion_tokens.
+        :return: True if model is a reasoning model.
         :rtype: bool
         """
 
         if not model_name:
             return False
-            
-        model_lower = model_name.lower()
-        reasoning_models = [
-            'gpt-5', 'gpt-5-mini', 'gpt-5-nano',
-            'o1', 'o1-preview', 'o1-mini',
-            'o3', 'o3-mini', 'o3-pro',
-            'o4-mini'
-        ]
-        return any(reasoning_model in model_lower for reasoning_model in reasoning_models)
 
-    @staticmethod
-    def _supports_temperature(model_name: str) -> bool:
+        # Identify reasoning models by their model family prefix
+        m = model_name.lower()
+        families = ['gpt-5', 'o1', 'o3', 'o4-mini']
+        return any(m == f or m.startswith(f + '-') for f in families)
+
+
+    def _normalize_openai_params(self, params: dict, model_name: str | None = None) -> None:
         """
-    
-        Check if model supports temperature and other sampling parameters.
-        
-        All reasoning models (o1, o3, GPT-5) don't support: temperature, top_p, 
-        presence_penalty, frequency_penalty, logprobs, top_logprobs, logit_bias.
-        
-        :param model_name: Name of the model to check.
-        :type model_name: str
-        :return: True if model supports temperature parameter.
-        :rtype: bool
+        Normalize OpenAI/Azure Chat Completions parameters for reasoning vs non-reasoning models.
+        Mutates params in place.
         """
-        if not model_name:
-            return True
+        model = model_name or self.model
+        if not model:
+            return
+
+        if self._is_reasoning_model(model):
+            # Convert max_tokens to max_completion_tokens
+            if 'max_tokens' in params:
+                params['max_completion_tokens'] = params.pop('max_tokens')
             
-        # All reasoning models don't support sampling parameters
-        return not LLMInterface._is_reasoning_model(model_name)
+            # Add reasoning effort parameter (default to low only if not specified)
+            if 'reasoning_effort' not in params or params.get('reasoning_effort') is None:
+                params['reasoning_effort'] = self.reasoning_effort or 'low'
+            
+            # Remove unsupported parameters for reasoning models
+            unsupported_params = [
+                'temperature', 'top_p', 'presence_penalty',
+                'frequency_penalty', 'logprobs', 'top_logprobs', 'logit_bias', 'n'
+            ]
+            for param in unsupported_params:
+                params.pop(param, None)
+        else:
+            # Convert max_completion_tokens to max_tokens
+            if 'max_completion_tokens' in params:
+                params['max_tokens'] = params.pop('max_completion_tokens')
+            
+            # Remove unsupported parameters for non-reasoning models
+            unsupported_params = ['reasoning_effort', 'reasoning_summary', 'include', 'text_verbosity']
+            for param in unsupported_params:
+                params.pop(param, None)
 
 
 class JSONSchemaCache:
