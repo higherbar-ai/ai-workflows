@@ -1365,7 +1365,7 @@ The JSON schema (and only the JSON schema) according to JSON Schema Draft 7:"""
         # Identify reasoning models by their model family prefix
         m = model_name.lower()
         families = ['gpt-5', 'o1', 'o3', 'o4-mini']
-        return any(m == f or m.startswith(f + '-') for f in families)
+        return any(m == f or m.startswith(f + '-') or m.startswith(f + '.') for f in families)
 
 
     def _normalize_openai_params(self, params: dict, model_name: str | None = None) -> None:
