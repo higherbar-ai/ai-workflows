@@ -427,7 +427,7 @@ class LLMInterface:
             result = self._llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
                                     temperature=self.temperature, no_system_prompt=bypass_history_and_system_prompt)
             # merge response data together
-            retval = ''.join(block.text for block in result.content)
+            retval = ''.join(block.text for block in result.content if hasattr(block, "text"))
         else:
             raise ValueError("LLM type not recognized.")
 
@@ -482,7 +482,7 @@ class LLMInterface:
                                             max_tokens=self.max_tokens, temperature=self.temperature,
                                             no_system_prompt=bypass_history_and_system_prompt)
             # merge response data together
-            retval = ''.join(block.text for block in result.content)
+            retval = ''.join(block.text for block in result.content if hasattr(block, "text"))
         else:
             raise ValueError("LLM type not recognized.")
 

@@ -16,7 +16,6 @@
 
 from ai_workflows.llm_utilities import LLMInterface
 import fitz  # (PyMuPDF)
-from fitz.utils import get_pixmap
 import pymupdf4llm
 from PIL import Image
 import json
@@ -674,7 +673,7 @@ class PDFDocumentConverter:
             page_height = page.rect.height
 
             # render page to pixmap
-            pix = get_pixmap(page, matrix=matrix, alpha=False)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
 
             # convert to PIL Image
             img = Image.frombytes("RGB", (pix.w, pix.h), pix.samples)
