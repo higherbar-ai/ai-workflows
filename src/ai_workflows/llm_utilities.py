@@ -17,7 +17,8 @@
 from anthropic.types import Message, MessageParam, RawMessageStreamEvent
 from openai import OpenAI, AsyncOpenAI, AzureOpenAI, AsyncAzureOpenAI, AsyncStream
 from openai import APITimeoutError, APIError, APIConnectionError, RateLimitError, InternalServerError
-from anthropic import Anthropic, AsyncAnthropic, AnthropicBedrock, AsyncAnthropicBedrock
+from anthropic import Anthropic, AsyncAnthropic
+from anthropic.lib.bedrock import AnthropicBedrock, AsyncAnthropicBedrock
 from anthropic import (APIConnectionError as AnthropicAPIConnectionError, RateLimitError as AnthropicRateLimitError,
                        InternalServerError as AnthropicInternalServerError, AsyncStream as AnthropicAsyncStream)
 from langsmith import traceable, get_current_run_tree
@@ -50,21 +51,21 @@ class LLMInterface:
     model: str
     json_retries: int = 2
     max_tokens: int = -1
-    reasoning_effort: str = None
+    reasoning_effort: str | None = None
     using_langsmith: bool = False
     system_prompt = ""
     maintain_history = False
     conversation_history: list = []
 
-    def __init__(self, openai_api_key: str = None, openai_model: str = None, temperature: float = 0.0,
+    def __init__(self, openai_api_key: str | None = None, openai_model: str | None = None, temperature: float = 0.0,
                  total_response_timeout_seconds: int = 600, number_of_retries: int = 2,
-                 seconds_between_retries: int = 5, azure_api_key: str = None, azure_api_engine: str = None,
-                 azure_api_base: str = None, azure_api_version: str = None, langsmith_api_key: str = None,
+                 seconds_between_retries: int = 5, azure_api_key: str | None = None, azure_api_engine: str | None = None,
+                 azure_api_base: str | None = None, azure_api_version: str | None = None, langsmith_api_key: str | None = None,
                  langsmith_project: str = 'ai_workflows', langsmith_endpoint: str = 'https://api.smith.langchain.com',
-                 json_retries: int = 2, anthropic_api_key: str = None, anthropic_model: str = None,
-                 bedrock_model: str = None, bedrock_region: str = "us-east-1", bedrock_aws_profile: str = None,
-                 max_tokens: int = -1, reasoning_effort: str = None, system_prompt: str = "", 
-                 maintain_history: bool = False, starting_chat_history: list[tuple] = None):
+                 json_retries: int = 2, anthropic_api_key: str | None = None, anthropic_model: str | None = None,
+                 bedrock_model: str | None = None, bedrock_region: str = "us-east-1", bedrock_aws_profile: str | None = None,
+                 max_tokens: int = -1, reasoning_effort: str | None = None, system_prompt: str = "",
+                 maintain_history: bool = False, starting_chat_history: list[tuple] | None = None):
         """
         Initialize the LLM interface for LLM interactions.
 
@@ -157,6 +158,8 @@ class LLMInterface:
 
         # initialize LLM access
         if openai_api_key:
+            if not openai_model:
+                raise ValueError("openai_model is required when openai_api_key is provided.")
             self.llm = OpenAI(api_key=openai_api_key)
             self.a_llm = AsyncOpenAI(api_key=openai_api_key)
             if self.using_langsmith:
@@ -165,6 +168,10 @@ class LLMInterface:
                 self.a_llm = wrap_openai(self.a_llm)
             self.model = openai_model
         elif azure_api_key:
+            if not azure_api_engine:
+                raise ValueError("azure_api_engine is required when azure_api_key is provided.")
+            if not azure_api_base:
+                raise ValueError("azure_api_base is required when azure_api_key is provided.")
             self.llm = AzureOpenAI(api_key=azure_api_key, azure_deployment=azure_api_engine,
                                    azure_endpoint=azure_api_base, api_version=azure_api_version)
             self.a_llm = AsyncAzureOpenAI(api_key=azure_api_key, azure_deployment=azure_api_engine,
@@ -187,6 +194,8 @@ class LLMInterface:
                 self.a_llm = AsyncAnthropicBedrock(aws_region=bedrock_region)
             self.model = bedrock_model
         elif anthropic_api_key:
+            if not anthropic_model:
+                raise ValueError("anthropic_model is required when anthropic_api_key is provided.")
             self.llm = Anthropic(api_key=anthropic_api_key)
             self.a_llm = AsyncAnthropic(api_key=anthropic_api_key)
             self.model = anthropic_model
@@ -422,21 +431,21 @@ class LLMInterface:
                                     reasoning_effort=self.reasoning_effort,
                                     no_system_prompt=bypass_history_and_system_prompt)
             # extract the content from the response
-            retval = result.choices[0].message.content
+            retval = result.choices[0].message.content  # type: ignore[union-attr]
         elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
             result = self._llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
                                     temperature=self.temperature, no_system_prompt=bypass_history_and_system_prompt)
             # merge response data together
-            retval = ''.join(block.text for block in result.content)
+            retval = ''.join(block.text for block in result.content if hasattr(block, "text"))  # type: ignore[union-attr]
         else:
             raise ValueError("LLM type not recognized.")
 
         # if we're maintaining history, add prompt and response
         if self.maintain_history and not bypass_history_and_system_prompt:
-            self.conversation_history += prompt + [self.ai_message(retval)]
+            self.conversation_history += prompt + [self.ai_message(retval)]  # type: ignore[arg-type]
 
         # return the content of the LLM response
-        return retval
+        return retval  # type: ignore[return-value]
 
     @traceable(run_type="chain", name="ai_workflows.a_get_llm_response")
     async def a_get_llm_response(self, prompt: str | list, bypass_history_and_system_prompt=False,
@@ -476,22 +485,22 @@ class LLMInterface:
                                             reasoning_effort=self.reasoning_effort,
                                             no_system_prompt=bypass_history_and_system_prompt)
             # extract the content from the response
-            retval = result.choices[0].message.content
+            retval = result.choices[0].message.content  # type: ignore[union-attr]
         elif isinstance(self.a_llm, AsyncAnthropic) or isinstance(self.a_llm, AsyncAnthropicBedrock):
             result = await self._a_llm_call(model=self.model, messages=prompt_with_history,
                                             max_tokens=self.max_tokens, temperature=self.temperature,
                                             no_system_prompt=bypass_history_and_system_prompt)
             # merge response data together
-            retval = ''.join(block.text for block in result.content)
+            retval = ''.join(block.text for block in result.content if hasattr(block, "text"))  # type: ignore[union-attr]
         else:
             raise ValueError("LLM type not recognized.")
 
         # if we're maintaining history, add prompt and response
         if self.maintain_history and not bypass_history_and_system_prompt:
-            self.conversation_history += prompt + [self.ai_message(retval)]
+            self.conversation_history += prompt + [self.ai_message(retval)]  # type: ignore[arg-type]
 
         # return the content of the LLM response
-        return retval
+        return retval  # type: ignore[return-value]
 
     def _llm_call(self, *args, **kwargs) -> (ChatCompletion | AsyncStream[ChatCompletionChunk] | Message |
                                              AnthropicAsyncStream[RawMessageStreamEvent]):
@@ -525,14 +534,14 @@ class LLMInterface:
                 # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
                 # grab the run tree and add starting metadata
                 rt = get_current_run_tree()
-                rt.metadata["model"] = ikwargs["model"]
-                rt.metadata["max_tokens"] = ikwargs["max_tokens"]
-                rt.metadata["temperature"] = ikwargs["temperature"]
+                rt.metadata["model"] = ikwargs["model"]  # type: ignore[union-attr]
+                rt.metadata["max_tokens"] = ikwargs["max_tokens"]  # type: ignore[union-attr]
+                rt.metadata["temperature"] = ikwargs["temperature"]  # type: ignore[union-attr]
                 # call Anthropic
                 inner_result = self.llm.messages.create(*iargs, **ikwargs)
                 # add usage metadata to the run tree (but it won't show nicely in the UI)
                 # (to show it nicely, we'd need to return a dict with a usage key and the content)
-                rt.add_metadata({
+                rt.add_metadata({  # type: ignore[union-attr]
                     "usage_metadata": {
                         "prompt_tokens": inner_result.usage.input_tokens,
                         "completion_tokens": inner_result.usage.output_tokens,
@@ -563,7 +572,7 @@ class LLMInterface:
             # automatically retry refusals
             for _ in range(self.number_of_retries):
                 result = _llm_call_inner(*args, **kwargs)
-                message = result.choices[0].message
+                message = result.choices[0].message  # type: ignore[union-attr]
                 if hasattr(message, 'refusal') and message.refusal:
                     continue
                 return result
@@ -610,14 +619,14 @@ class LLMInterface:
                 # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
                 # grab the run tree and add starting metadata
                 rt = get_current_run_tree()
-                rt.metadata["model"] = ikwargs["model"]
-                rt.metadata["max_tokens"] = ikwargs["max_tokens"]
-                rt.metadata["temperature"] = ikwargs["temperature"]
+                rt.metadata["model"] = ikwargs["model"]  # type: ignore[union-attr]
+                rt.metadata["max_tokens"] = ikwargs["max_tokens"]  # type: ignore[union-attr]
+                rt.metadata["temperature"] = ikwargs["temperature"]  # type: ignore[union-attr]
                 # call Anthropic
                 inner_result = await self.a_llm.messages.create(*iargs, **ikwargs)
                 # add usage metadata to the run tree (but it won't show nicely in the UI)
                 # (to show it nicely, we'd need to return a dict with a usage key and the content)
-                rt.add_metadata({
+                rt.add_metadata({  # type: ignore[union-attr]
                     "usage_metadata": {
                         "prompt_tokens": inner_result.usage.input_tokens,
                         "completion_tokens": inner_result.usage.output_tokens,
@@ -648,7 +657,7 @@ class LLMInterface:
             # automatically retry refusals
             for _ in range(self.number_of_retries):
                 result = await _a_llm_call_inner(*args, **kwargs)
-                message = result.choices[0].message
+                message = result.choices[0].message  # type: ignore[union-attr]
                 if hasattr(message, 'refusal') and message.refusal:
                     continue
                 return result
@@ -681,7 +690,7 @@ class LLMInterface:
                 encoding = tiktoken.encoding_for_model("gpt-4o")
             return len(encoding.encode(text))
         else:
-            count = self.llm.messages.count_tokens(model=self.model,
+            count = self.llm.messages.count_tokens(model=self.model,  # type: ignore[union-attr]
                                                    messages=[MessageParam(role="user", content=text)])
             return count.input_tokens
 
@@ -704,8 +713,10 @@ class LLMInterface:
                 encoding = tiktoken.encoding_for_model("gpt-4o")
             return len(encoding.encode(text))
         else:
-            count = await self.a_llm.beta.messages.count_tokens(model=self.model,
-                                                                messages=[MessageParam(role="user", content=text)])
+            count = await self.a_llm.beta.messages.count_tokens(  # type: ignore[union-attr]
+                model=self.model,
+                messages=[MessageParam(role="user", content=text)]  # type: ignore[arg-type]
+            )
             return count.input_tokens
 
     def enforce_max_tokens(self, text: str, max_tokens: int) -> str:
@@ -996,7 +1007,7 @@ class LLMInterface:
                 return current_bytes
 
             # if image is too large, reduce DPI by 10%
-            dpi = int(dpi * 0.9)
+            dpi = int(dpi * 0.9)  # type: ignore[operator]
 
             # if DPI gets too low, raise an error
             if dpi < 50:  # 72 DPI is typically considered the minimum for screen display, so 50 would be quite low
@@ -1020,8 +1031,8 @@ class LLMInterface:
         json_schema_prompt, json_schema_schema = self._get_schema_prompt_and_meta_schema(json_output_spec)
 
         # call out to LLM to generate JSON schema
-        parsed_response, response, error = await self.a_get_json_response(json_schema_prompt, json_schema_schema,
-                                                                          bypass_history_and_system_prompt=True)
+        parsed_response, _response, error = await self.a_get_json_response(json_schema_prompt, json_schema_schema,
+                                                                            bypass_history_and_system_prompt=True)
 
         # raise error if any
         if error:
@@ -1045,8 +1056,8 @@ class LLMInterface:
         json_schema_prompt, json_schema_schema = self._get_schema_prompt_and_meta_schema(json_output_spec)
 
         # call out to LLM to generate JSON schema
-        parsed_response, response, error = self.get_json_response(json_schema_prompt, json_schema_schema,
-                                                                  bypass_history_and_system_prompt=True)
+        parsed_response, _response, error = self.get_json_response(json_schema_prompt, json_schema_schema,
+                                                                    bypass_history_and_system_prompt=True)
 
         # raise error if any
         if error:

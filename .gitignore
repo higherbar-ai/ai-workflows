@@ -113,6 +113,9 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
+# Python virtual environment
+.venv/
+
 # Directories created by setuptools, during Python packaging
 /src/py_ai_workflows.egg-info/
 /dist/
