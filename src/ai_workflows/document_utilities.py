@@ -64,11 +64,11 @@ class DocumentInterface:
     max_json_via_markdown_chunk_tokens = None
     max_parallel_requests = 5
 
-    llm_interface: LLMInterface = None
+    llm_interface: LLMInterface | None = None
     pdf_image_dpi: int = 150
     pdf_image_max_bytes = 1024 * 1024 * 4  # 4MB
 
-    def __init__(self, llm_interface: LLMInterface = None, pdf_image_dpi: int = 150,
+    def __init__(self, llm_interface: LLMInterface | None = None, pdf_image_dpi: int = 150,
                  pdf_image_max_bytes: int = 1024 * 1024 * 4, max_parallel_requests: int = 5):
         """
         Initialize the document interface for reading and processing documents.
@@ -112,7 +112,7 @@ class DocumentInterface:
         """
 
         # use internal conversion function
-        return self._convert(filepath, to_format="md", use_text=use_text)
+        return self._convert(filepath, to_format="md", use_text=use_text)  # type: ignore[return-value]
 
     def convert_to_json(self, filepath: str, json_context: str, json_job: str, json_output_spec: str,
                         markdown_first: Optional[bool] = None, json_output_schema: str | None = "") -> list[dict]:
@@ -158,6 +158,8 @@ class DocumentInterface:
                 markdown = doc_interface_no_llm.convert_to_markdown(filepath)
                 markdown_tokens = self.llm_interface.count_tokens(markdown)
 
+                if self.max_json_via_markdown_chunk_tokens is None:
+                    raise ValueError("max_json_via_markdown_chunk_tokens must be set when llm_interface is provided.")
                 if markdown_tokens <= self.max_json_via_markdown_chunk_tokens:
                     # if we can do JSON conversion all in one shot, use doc->Markdown->JSON path
                     markdown_first = True
@@ -169,7 +171,7 @@ class DocumentInterface:
                 markdown_first = True
 
         # use internal conversion function
-        return self._convert(filepath, to_format="json" if not markdown_first else "mdjson",
+        return self._convert(filepath, to_format="json" if not markdown_first else "mdjson",  # type: ignore[return-value]
                              json_context=json_context, json_job=json_job, json_output_spec=json_output_spec,
                              json_output_schema=json_output_schema)
 
@@ -340,7 +342,7 @@ class DocumentInterface:
 
         if to_format in ["json", "mdjson"]:
             # if we're after JSON, convert the Markdown to JSON using the LLM
-            return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)
+            return self.markdown_to_json(markdown, json_context, json_job, json_output_spec, json_output_schema)  # type: ignore[arg-type]
         else:
             # otherwise, just return the Markdown
             return markdown
@@ -409,9 +411,12 @@ class DocumentInterface:
         # require LLM interface to continue
         if self.llm_interface is None:
             raise ValueError("LLM interface required for JSON conversion")
+        llm_interface = self.llm_interface
 
         # default max_chunk_size if not specified
         if not max_chunk_size:
+            if self.max_json_via_markdown_chunk_tokens is None:
+                raise ValueError("max_chunk_size must be specified when no default chunk token limit is set.")
             max_chunk_size = self.max_json_via_markdown_chunk_tokens
 
         # handle automatic schema generation
@@ -442,7 +447,7 @@ Markdown text enclosed by |@| delimiters:
 
 Your JSON response precisely following the instructions given above the Markdown text:"""
 
-                response_dict, response_text, error = self.llm_interface.get_json_response(
+                response_dict, _response_text, error = llm_interface.get_json_response(
                     prompt=json_prompt,
                     json_validation_schema=json_output_schema,
                     json_validation_desc=json_validation_desc
@@ -512,6 +517,8 @@ Your JSON response precisely following the instructions given above the Markdown
         :rtype: List[str]
         """
 
+        if self.llm_interface is None:
+            raise ValueError("LLM interface required for token-based text splitting.")
         splitter = MarkdownSplitter(self.llm_interface.count_tokens, max_tokens=max_tokens, min_tokens=min_tokens)
         return splitter.split_text(text)
 
@@ -576,12 +583,12 @@ class PDFDocumentConverter:
     """Utility class for converting PDF files to Markdown."""
 
     # member variables
-    llm_interface: LLMInterface = None
+    llm_interface: LLMInterface | None = None
     pdf_image_dpi: int = 150
     pdf_image_max_bytes: int = 1024 * 1024 * 4  # 4MB
     max_parallel_requests: int = 5
 
-    def __init__(self, llm_interface: LLMInterface = None, pdf_image_dpi: int = 150,
+    def __init__(self, llm_interface: LLMInterface | None = None, pdf_image_dpi: int = 150,
                  pdf_image_max_bytes: int = 1024 * 1024 * 4, max_parallel_requests: int = 5):
         """
         Initialize for converting PDF files.
@@ -682,20 +689,20 @@ class PDFDocumentConverter:
             page_dict = page.get_text("dict")
 
             # check if page is a double-page spread
-            if approx_equal(page_height, min_page_height) and approx_equal(page_width, 2 * min_page_width):
+            if approx_equal(page_height, min_page_height) and approx_equal(page_width, 2 * min_page_width):  # type: ignore[operator]
                 # if so, split the image into two images
                 left_img = img.crop((0, 0, img.width // 2, img.height))
                 right_img = img.crop((img.width // 2, 0, img.width, img.height))
 
                 # also split the page_dict into two halves
-                left_dict, right_dict = PDFDocumentConverter._split_page_dict(page_dict)
+                left_dict, right_dict = PDFDocumentConverter._split_page_dict(page_dict)  # type: ignore[arg-type]
 
                 # add to list
-                images_with_text.extend([(left_img, PDFDocumentConverter._plain_text_from_page_dict(left_dict)),
+                images_with_text.extend([(left_img, PDFDocumentConverter._plain_text_from_page_dict(left_dict)),  # type: ignore[arg-type]
                                          (right_img, PDFDocumentConverter._plain_text_from_page_dict(right_dict))])
             else:
                 # add to list
-                images_with_text.append((img, PDFDocumentConverter._plain_text_from_page_dict(page_dict)))
+                images_with_text.append((img, PDFDocumentConverter._plain_text_from_page_dict(page_dict)))  # type: ignore[arg-type]
 
         doc.close()
         return images_with_text
@@ -914,6 +921,7 @@ class PDFDocumentConverter:
         # require LLM interface to continue
         if self.llm_interface is None:
             raise ValueError("LLM interface required for PDF to JSON conversion")
+        llm_interface = self.llm_interface
 
         # convert PDF to images
         images_and_text = PDFDocumentConverter.pdf_to_images_and_text(pdf_path=pdf_path, dpi=self.pdf_image_dpi)
@@ -936,7 +944,7 @@ class PDFDocumentConverter:
                                                    txt if txt and use_text else "")
 
             # call out to the LLM and process the returned JSON
-            response_dict, response_text, error = self.llm_interface.get_json_response(
+            response_dict, _response_text, error = llm_interface.get_json_response(
                 prompt=prompt_with_image,
                 json_validation_schema=json_output_schema,
                 json_validation_desc=json_validation_desc
@@ -1018,6 +1026,8 @@ Your JSON response precisely following the instructions above:"""
 
 Your JSON response precisely following the instructions above:"""
 
+        if self.llm_interface is None:
+            raise ValueError("LLM interface required for image prompt construction.")
         return [self.llm_interface.user_message_with_image(
                 user_message=image_prompt, image=image, max_bytes=self.pdf_image_max_bytes,
                 current_dpi=self.pdf_image_dpi)]
@@ -1050,7 +1060,7 @@ Your JSON response precisely following the instructions above:"""
                 logging.warning(f"Error converting {pdf_path} using Docling: {e}")
 
             # if that failed, fall back to PyMuPDF4LLM
-            return pymupdf4llm.to_markdown(pdf_path)
+            return pymupdf4llm.to_markdown(pdf_path)  # type: ignore[return-value]
 
         # otherwise, we'll use the LLM to process the PDF
         json_context = "The page might include a mix of text, tables, figures, charts, images, or other elements."
@@ -1178,8 +1188,8 @@ class ExcelDocumentConverter:
             is_pivot_table: bool = False
 
         # initialize class-level member variables
-        wb: Workbook = None
-        filepath: str = None
+        wb: Workbook = None  # type: ignore[assignment]
+        filepath: str = None  # type: ignore[assignment]
 
         def __init__(self, filepath: str):
             """
@@ -1205,12 +1215,12 @@ class ExcelDocumentConverter:
             for sheet in self.wb.worksheets:
                 # check for images
                 # noinspection PyProtectedMember
-                if hasattr(sheet, '_images') and sheet._images:
+                if hasattr(sheet, '_images') and sheet._images:  # type: ignore[attr-defined]
                     return True, f"Sheet '{sheet.title}' contains images"
 
                 # check for charts
                 # noinspection PyProtectedMember
-                if hasattr(sheet, '_charts') and sheet._charts:
+                if hasattr(sheet, '_charts') and sheet._charts:  # type: ignore[attr-defined]
                     return True, f"Sheet '{sheet.title}' contains charts"
 
             return False, "Content is suitable for direct markdown conversion"
@@ -1230,9 +1240,9 @@ class ExcelDocumentConverter:
             """
 
             # check if sheet has pivot tables defined
-            if hasattr(sheet, 'pivotTables') and sheet.pivotTables:
+            if hasattr(sheet, 'pivotTables') and sheet.pivotTables:  # type: ignore[attr-defined]
                 # check if our range intersects with any pivot table range
-                for pivot in sheet.pivotTables:
+                for pivot in sheet.pivotTables:  # type: ignore[attr-defined]
                     if (pivot.location.min_row <= table_range.end_row and
                             pivot.location.max_row >= table_range.start_row and
                             pivot.location.min_col <= table_range.end_col and
@@ -1312,13 +1322,13 @@ class ExcelDocumentConverter:
                                 start_row=row_idx,
                                 end_row=row_idx,
                                 start_col=start_col,
-                                end_col=end_col
+                                end_col=end_col  # type: ignore[arg-type]
                             )
                         else:
                             # extend current table
                             current_table.end_row = row_idx
                             current_table.start_col = min(current_table.start_col, start_col)
-                            current_table.end_col = max(current_table.end_col, end_col)
+                            current_table.end_col = max(current_table.end_col, end_col)  # type: ignore[type-var]
                 else:
                     # empty row - close current table if it exists
                     if current_table is not None:
@@ -1666,11 +1676,11 @@ class ExcelDocumentConverter:
             row_values = []
 
             for cell in row:
-                merge_range = ExcelDocumentConverter._get_merge_range_for_cell(cell, relevant_merges)
+                merge_range = ExcelDocumentConverter._get_merge_range_for_cell(cell, relevant_merges)  # type: ignore[arg-type]
                 if merge_range:
-                    if ExcelDocumentConverter._is_first_cell_in_merge_range(cell, merge_range):
+                    if ExcelDocumentConverter._is_first_cell_in_merge_range(cell, merge_range):  # type: ignore[arg-type]
                         value = sheet.cell(merge_range.min_row, merge_range.min_col).value
-                        formatted_value = ExcelDocumentConverter._format_cell_value(cell, value)
+                        formatted_value = ExcelDocumentConverter._format_cell_value(cell, value)  # type: ignore[arg-type]
                         row_values.append(formatted_value)
 
                         # consider adding comment about the merge
@@ -1689,8 +1699,8 @@ class ExcelDocumentConverter:
                         row_values.append('')
                 else:
                     value = cell.value
-                    formatted_value = ExcelDocumentConverter._format_cell_value(cell, value) if value is not None \
-                        else ''
+                    formatted_value = (ExcelDocumentConverter._format_cell_value(cell, value)  # type: ignore[arg-type]
+                        if value is not None else '')
                     row_values.append(formatted_value)
 
             # only add rows that aren't completely empty
@@ -1859,7 +1869,7 @@ class ExcelDocumentConverter:
                             (  # centered over table
                                     cell.alignment and
                                     cell.alignment.horizontal == 'center' and
-                                    abs((end_col - start_col) / 2 + start_col - cell.column) <= 1
+                                    abs((end_col - start_col) / 2 + start_col - cell.column) <= 1  # type: ignore[operator]
                             )):
                         return str(cell.value).strip()
 
@@ -2235,7 +2245,7 @@ class UnstructuredDocumentConverter:
 
                 # add heading
                 if self.heading_style == "atx":
-                    markdown_parts.append(f"{'#' * element.level} {self.content_with_links(element)}")
+                    markdown_parts.append(f"{'#' * element.level} {self.content_with_links(element)}")  # type: ignore[operator]
                 else:
                     markdown_parts.append(self.content_with_links(element))
                     markdown_parts.append('=' if element.level == 1 else '-' * len(self.content_with_links(element)))
@@ -2246,7 +2256,7 @@ class UnstructuredDocumentConverter:
                 # add paragraph content
                 markdown_parts.append(self.content_with_links(element))
             elif element.type == "list_item":
-                indent_level = element.metadata.get("indent_level", 0)
+                indent_level = element.metadata.get("indent_level", 0)  # type: ignore[union-attr]
                 # adjust list stack
                 while len(list_stack) > indent_level:
                     list_stack.pop()
@@ -2302,15 +2312,15 @@ class UnstructuredDocumentConverter:
         retval = element.content
 
         # add hyperlinks, if present
-        if ("link_urls" in element.metadata and element.metadata["link_urls"] and "link_texts" in element.metadata
-                and element.metadata["link_texts"]):
+        if ("link_urls" in element.metadata and element.metadata["link_urls"] and "link_texts" in element.metadata  # type: ignore[operator]
+                and element.metadata["link_texts"]):  # type: ignore[index]
             # see if we have start indexes for the hyperlinks
-            if "link_start_indexes" in element.metadata and element.metadata["link_start_indexes"]:
+            if "link_start_indexes" in element.metadata and element.metadata["link_start_indexes"]:  # type: ignore[operator]
                 # combine link data and sort by start index in descending order
                 links = sorted(
-                    zip(element.metadata["link_start_indexes"],
-                        element.metadata["link_texts"],
-                        element.metadata["link_urls"]),
+                    zip(element.metadata["link_start_indexes"],  # type: ignore[index]
+                        element.metadata["link_texts"],  # type: ignore[index]
+                        element.metadata["link_urls"]),  # type: ignore[index]
                     reverse=True
                 )
                 # replace each link text with Markdown link syntax
@@ -2322,7 +2332,7 @@ class UnstructuredDocumentConverter:
                         retval = retval[:start_index] + markdown_link + retval[end_index:]
             else:
                 # if no start indexes, just use blind text replacement (which is error-prone)
-                for link_text, link_url in zip(element.metadata["link_texts"], element.metadata["link_urls"]):
+                for link_text, link_url in zip(element.metadata["link_texts"], element.metadata["link_urls"]):  # type: ignore[index]
                     if link_url.startswith("https:") or link_url.startswith("http:") or link_url.startswith("mailto:"):
                         # replace the link text with Markdown hyperlink syntax only if it's not already hyperlinked
                         markdown_link = f"[{link_text}]({link_url})"
