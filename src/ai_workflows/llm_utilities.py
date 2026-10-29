@@ -535,19 +535,22 @@ class LLMInterface:
             elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
                 # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
                 # grab the run tree and add starting metadata
+                # (there is no run tree when LangSmith tracing is off)
                 rt = get_current_run_tree()
-                rt.metadata["model"] = ikwargs["model"]  # type: ignore[union-attr]
-                rt.metadata["max_tokens"] = ikwargs["max_tokens"]  # type: ignore[union-attr]
+                if rt is not None:
+                    rt.metadata["model"] = ikwargs["model"]
+                    rt.metadata["max_tokens"] = ikwargs["max_tokens"]
                 # call Anthropic
                 inner_result = self.llm.messages.create(*iargs, **ikwargs)
                 # add usage metadata to the run tree (but it won't show nicely in the UI)
                 # (to show it nicely, we'd need to return a dict with a usage key and the content)
-                rt.add_metadata({  # type: ignore[union-attr]
-                    "usage_metadata": {
-                        "prompt_tokens": inner_result.usage.input_tokens,
-                        "completion_tokens": inner_result.usage.output_tokens,
-                        "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
-                    }})
+                if rt is not None:
+                    rt.add_metadata({
+                        "usage_metadata": {
+                            "prompt_tokens": inner_result.usage.input_tokens,
+                            "completion_tokens": inner_result.usage.output_tokens,
+                            "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
+                        }})
                 return inner_result
             else:
                 raise ValueError("LLM type not recognized.")
@@ -619,19 +622,22 @@ class LLMInterface:
             elif isinstance(self.a_llm, AsyncAnthropic) or isinstance(self.a_llm, AsyncAnthropicBedrock):
                 # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
                 # grab the run tree and add starting metadata
+                # (there is no run tree when LangSmith tracing is off)
                 rt = get_current_run_tree()
-                rt.metadata["model"] = ikwargs["model"]  # type: ignore[union-attr]
-                rt.metadata["max_tokens"] = ikwargs["max_tokens"]  # type: ignore[union-attr]
+                if rt is not None:
+                    rt.metadata["model"] = ikwargs["model"]
+                    rt.metadata["max_tokens"] = ikwargs["max_tokens"]
                 # call Anthropic
                 inner_result = await self.a_llm.messages.create(*iargs, **ikwargs)
                 # add usage metadata to the run tree (but it won't show nicely in the UI)
                 # (to show it nicely, we'd need to return a dict with a usage key and the content)
-                rt.add_metadata({  # type: ignore[union-attr]
-                    "usage_metadata": {
-                        "prompt_tokens": inner_result.usage.input_tokens,
-                        "completion_tokens": inner_result.usage.output_tokens,
-                        "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
-                    }})
+                if rt is not None:
+                    rt.add_metadata({
+                        "usage_metadata": {
+                            "prompt_tokens": inner_result.usage.input_tokens,
+                            "completion_tokens": inner_result.usage.output_tokens,
+                            "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
+                        }})
                 return inner_result
             else:
                 raise ValueError("LLM type not recognized.")
