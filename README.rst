@@ -81,6 +81,9 @@ AWS Bedrock support
 
 Finally, if you're accessing models via AWS Bedrock, the AWS CLI needs to be installed and configured for AWS access.
 
+Requests go out on Claude API version ``2026-10-21``, which Bedrock serves for Claude 4.7 and later models only. Anthropic
+requests, direct or through Bedrock, send no ``temperature``, because that API version rejects every sampling parameter.
+
 Jupyter notebooks with Google Colab support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
