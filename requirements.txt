@@ -1,5 +1,5 @@
 openai>=1.99.0,<3.0
-anthropic[bedrock]~=0.83.0
+anthropic[bedrock]~=2.3
 tiktoken
 langsmith>=0.3.43,<1.0.0
 tenacity

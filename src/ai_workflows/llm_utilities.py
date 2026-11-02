@@ -14,7 +14,7 @@
 
 """Utilities for interacting with LLMs in AI workflows."""
 
-from anthropic.types import Message, MessageParam, RawMessageStreamEvent
+from anthropic.types import Message, RawMessageStreamEvent
 from openai import OpenAI, AsyncOpenAI, AzureOpenAI, AsyncAzureOpenAI, AsyncStream
 from openai import APITimeoutError, APIError, APIConnectionError, RateLimitError, InternalServerError
 from anthropic import Anthropic, AsyncAnthropic
@@ -76,7 +76,9 @@ class LLMInterface:
         :type openai_api_key: str
         :param openai_model: OpenAI model name. Default is None.
         :type openai_model: str
-        :param temperature: Temperature setting for the LLM. Default is 0.0.
+        :param temperature: Temperature setting for OpenAI and Azure models. Default is 0.0. Anthropic and Bedrock
+            requests send no sampling parameters, because the Claude API rejects them, so Claude samples with its
+            defaults.
         :type temperature: float
         :param total_response_timeout_seconds: Timeout for LLM responses in seconds. Default is 600.
         :type total_response_timeout_seconds: int
@@ -434,7 +436,7 @@ class LLMInterface:
             retval = result.choices[0].message.content  # type: ignore[union-attr]
         elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
             result = self._llm_call(model=self.model, messages=prompt_with_history, max_tokens=self.max_tokens,
-                                    temperature=self.temperature, no_system_prompt=bypass_history_and_system_prompt)
+                                    no_system_prompt=bypass_history_and_system_prompt)
             # merge response data together
             retval = ''.join(block.text for block in result.content if hasattr(block, "text"))  # type: ignore[union-attr]
         else:
@@ -488,7 +490,7 @@ class LLMInterface:
             retval = result.choices[0].message.content  # type: ignore[union-attr]
         elif isinstance(self.a_llm, AsyncAnthropic) or isinstance(self.a_llm, AsyncAnthropicBedrock):
             result = await self._a_llm_call(model=self.model, messages=prompt_with_history,
-                                            max_tokens=self.max_tokens, temperature=self.temperature,
+                                            max_tokens=self.max_tokens,
                                             no_system_prompt=bypass_history_and_system_prompt)
             # merge response data together
             retval = ''.join(block.text for block in result.content if hasattr(block, "text"))  # type: ignore[union-attr]
@@ -533,20 +535,22 @@ class LLMInterface:
             elif isinstance(self.llm, Anthropic) or isinstance(self.llm, AnthropicBedrock):
                 # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
                 # grab the run tree and add starting metadata
+                # (there is no run tree when LangSmith tracing is off)
                 rt = get_current_run_tree()
-                rt.metadata["model"] = ikwargs["model"]  # type: ignore[union-attr]
-                rt.metadata["max_tokens"] = ikwargs["max_tokens"]  # type: ignore[union-attr]
-                rt.metadata["temperature"] = ikwargs["temperature"]  # type: ignore[union-attr]
+                if rt is not None:
+                    rt.metadata["model"] = ikwargs["model"]
+                    rt.metadata["max_tokens"] = ikwargs["max_tokens"]
                 # call Anthropic
                 inner_result = self.llm.messages.create(*iargs, **ikwargs)
                 # add usage metadata to the run tree (but it won't show nicely in the UI)
                 # (to show it nicely, we'd need to return a dict with a usage key and the content)
-                rt.add_metadata({  # type: ignore[union-attr]
-                    "usage_metadata": {
-                        "prompt_tokens": inner_result.usage.input_tokens,
-                        "completion_tokens": inner_result.usage.output_tokens,
-                        "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
-                    }})
+                if rt is not None:
+                    rt.add_metadata({
+                        "usage_metadata": {
+                            "prompt_tokens": inner_result.usage.input_tokens,
+                            "completion_tokens": inner_result.usage.output_tokens,
+                            "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
+                        }})
                 return inner_result
             else:
                 raise ValueError("LLM type not recognized.")
@@ -618,20 +622,22 @@ class LLMInterface:
             elif isinstance(self.a_llm, AsyncAnthropic) or isinstance(self.a_llm, AsyncAnthropicBedrock):
                 # need to manually add tracing details for Anthropic (not for OpenAI since it's wrapped)
                 # grab the run tree and add starting metadata
+                # (there is no run tree when LangSmith tracing is off)
                 rt = get_current_run_tree()
-                rt.metadata["model"] = ikwargs["model"]  # type: ignore[union-attr]
-                rt.metadata["max_tokens"] = ikwargs["max_tokens"]  # type: ignore[union-attr]
-                rt.metadata["temperature"] = ikwargs["temperature"]  # type: ignore[union-attr]
+                if rt is not None:
+                    rt.metadata["model"] = ikwargs["model"]
+                    rt.metadata["max_tokens"] = ikwargs["max_tokens"]
                 # call Anthropic
                 inner_result = await self.a_llm.messages.create(*iargs, **ikwargs)
                 # add usage metadata to the run tree (but it won't show nicely in the UI)
                 # (to show it nicely, we'd need to return a dict with a usage key and the content)
-                rt.add_metadata({  # type: ignore[union-attr]
-                    "usage_metadata": {
-                        "prompt_tokens": inner_result.usage.input_tokens,
-                        "completion_tokens": inner_result.usage.output_tokens,
-                        "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
-                    }})
+                if rt is not None:
+                    rt.add_metadata({
+                        "usage_metadata": {
+                            "prompt_tokens": inner_result.usage.input_tokens,
+                            "completion_tokens": inner_result.usage.output_tokens,
+                            "total_tokens": inner_result.usage.input_tokens + inner_result.usage.output_tokens
+                        }})
                 return inner_result
             else:
                 raise ValueError("LLM type not recognized.")
@@ -691,7 +697,7 @@ class LLMInterface:
             return len(encoding.encode(text))
         else:
             count = self.llm.messages.count_tokens(model=self.model,  # type: ignore[union-attr]
-                                                   messages=[MessageParam(role="user", content=text)])
+                                                   messages=[{"role": "user", "content": text}])
             return count.input_tokens
 
     async def a_count_tokens(self, text: str) -> int:
@@ -715,7 +721,7 @@ class LLMInterface:
         else:
             count = await self.a_llm.beta.messages.count_tokens(  # type: ignore[union-attr]
                 model=self.model,
-                messages=[MessageParam(role="user", content=text)]  # type: ignore[arg-type]
+                messages=[{"role": "user", "content": text}]
             )
             return count.input_tokens
 
